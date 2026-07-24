@@ -6,12 +6,21 @@ SUFFIX_MULTIPLIERS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
 _VALUE_RE = re.compile(r"^([0-9]*\.?[0-9]+)\s*([KkMmBbTt]?)$")
 
 GEO_LABELS = {"state": "Whole States", "county": "Whole Counties", "tract": "Whole Neighborhoods"}
+_GEO_LABELS_SINGULAR = {"state": "whole state", "county": "whole county", "tract": "whole neighborhood"}
 LEVEL_LABELS = {"state": "State", "county": "County", "tract": "Neighborhood (tract)"}
 LEVEL_ORDER = ["state", "county", "tract"]
 
 HIGHLIGHT_FILL = "#F57C00"
 HIGHLIGHT_BORDER = "#E65100"
 TRACT_MIN_ZOOM = 8
+
+
+def geo_label(level: str, count: float) -> str:
+    """Singular/plural geography label, e.g. geo_label('state', 1) -> 'whole state',
+    geo_label('county', 3) -> 'whole counties'."""
+    if round(count) == 1:
+        return _GEO_LABELS_SINGULAR.get(level, level)
+    return GEO_LABELS.get(level, level).lower()
 
 
 def parse_value(raw: str) -> float | None:
@@ -50,6 +59,14 @@ def fmt_full(value: float) -> str:
 def fmt_num(value: float) -> str:
     """Integer with thousands separators, e.g. 12,345."""
     return f"{round(value):,}"
+
+
+def fmt_houses(value: float) -> str:
+    """House count, e.g. 12,345. Below one, keeps two decimals (e.g. '0.17') instead
+    of rounding a real fractional-home amount down to a meaningless '0'."""
+    if value >= 1:
+        return fmt_num(value)
+    return f"{value:.2f}"
 
 
 def price_color(value: float, vmin: float, vmax: float) -> str:

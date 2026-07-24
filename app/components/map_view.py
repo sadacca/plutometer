@@ -1,7 +1,10 @@
 """Folium map builder for plutometer -- basemap, gradient overlay, and selection highlight."""
 
+import json
+
 import geopandas as gpd
 import folium
+import streamlit as st
 
 from components.utils import HIGHLIGHT_BORDER, HIGHLIGHT_FILL, price_color
 
@@ -21,15 +24,22 @@ def build_map(
     marker_latlon: tuple[float, float] | None,
     center: tuple[float, float] = DEFAULT_CENTER,
     zoom: int = DEFAULT_ZOOM,
+    render_key: tuple = (),
 ) -> folium.Map:
     """Build the map for the current render pass. render_gdf is already resolved by the
     caller to the right slice for the active level (full state/county gdf, or the current
-    tract viewport) -- this module only draws it."""
+    tract/county viewport) -- this module only draws it.
+
+    render_key should uniquely identify render_gdf's content (e.g. (level, bbox)) so that
+    reruns which don't change the map view (typing in a text box, toggling an unrelated
+    control) can reuse the already-serialized/styled GeoJSON instead of re-walking every
+    feature -- see _styled_geojson.
+    """
     m = folium.Map(location=list(center), zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=BASEMAP_URL, attr=BASEMAP_ATTR, name="basemap", max_zoom=18).add_to(m)
 
     if render_gdf is not None and len(render_gdf) > 0:
-        _add_gradient_layer(m, render_gdf, overlay_mode)
+        _add_gradient_layer(m, render_gdf, overlay_mode, render_key)
         if selected_geoids:
             _add_highlight_layer(m, render_gdf, selected_geoids)
         _add_legend(m, overlay_mode)
@@ -53,32 +63,56 @@ def build_map(
     return m
 
 
-def _add_gradient_layer(m: folium.Map, gdf: gpd.GeoDataFrame, overlay_mode: str) -> None:
+_RENDER_COLS = ["GEOID", "NAME", "total_value", "median_home_value", "median_income", "geometry"]
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _styled_geojson(_gdf: gpd.GeoDataFrame, overlay_mode: str, render_key: tuple) -> dict:
+    """GeoJSON with each feature's fill style precomputed and stashed in its properties.
+
+    Keyed on render_key (e.g. (level, bbox)) rather than on _gdf itself (leading underscore
+    excludes it from Streamlit's cache hash -- GeoDataFrames aren't cheaply hashable). Reruns
+    that don't change the map view -- typing in the amount box, toggling the geo-level
+    selectbox before it's actually changed, etc. -- hit this cache and skip re-serializing
+    geometry to GeoJSON and recomputing colors for every feature, which is the expensive part
+    of a map rebuild for county/tract-sized feature counts.
+    """
+    cols = [c for c in _RENDER_COLS if c in _gdf.columns]
+    geojson = json.loads(_gdf[cols].to_json())
+
     if overlay_mode == "none":
+        for feat in geojson["features"]:
+            feat["properties"]["_style"] = {"color": "#9AA5B1", "weight": 0.6, "fillOpacity": 0}
+        return geojson
 
-        def style_function(_feature):
-            return {"color": "#9AA5B1", "weight": 0.6, "fillOpacity": 0}
+    field = _OVERLAY_FIELD[overlay_mode]
+    vals = [f["properties"].get(field) for f in geojson["features"]]
+    vals = [v for v in vals if v and v > 0]
+    vmin, vmax = (min(vals), max(vals)) if vals else (0.0, 0.0)
+    for feat in geojson["features"]:
+        v = feat["properties"].get(field) or 0
+        fill = price_color(v, vmin, vmax) if v > 0 else "#f0f0f0"
+        # Thin, near-invisible borders so filled regions read as a smooth
+        # choropleth instead of a grid of outlined boxes -- the fill color
+        # differences alone carry the shape boundaries.
+        feat["properties"]["_style"] = {
+            "color": "#ffffff", "weight": 0.4, "opacity": 0.5, "fillColor": fill, "fillOpacity": 0.6,
+        }
+    return geojson
 
-    else:
-        field = _OVERLAY_FIELD[overlay_mode]
-        vals = [v for v in gdf.get(field, []) if v and v > 0]
-        vmin, vmax = (min(vals), max(vals)) if vals else (0.0, 0.0)
 
-        def style_function(feature, field=field, vmin=vmin, vmax=vmax):
-            v = feature["properties"].get(field) or 0
-            fill = price_color(v, vmin, vmax) if v > 0 else "#f0f0f0"
-            # Thin, near-invisible borders so filled regions read as a smooth
-            # choropleth instead of a grid of outlined boxes -- the fill color
-            # differences alone carry the shape boundaries.
-            return {"color": "#ffffff", "weight": 0.4, "opacity": 0.5, "fillColor": fill, "fillOpacity": 0.6}
-
-    cols = [c for c in ["GEOID", "NAME", "total_value", "median_home_value", "median_income", "geometry"] if c in gdf.columns]
+def _add_gradient_layer(m: folium.Map, gdf: gpd.GeoDataFrame, overlay_mode: str, render_key: tuple) -> None:
+    geojson = _styled_geojson(gdf, overlay_mode, render_key)
 
     # No hover tooltip: on touch devices a tap first triggers hover/tooltip
     # rather than the click handler, so every selection would need a double
     # tap. Full detail is already available in the results panel after a
     # click -- a hover-only affordance isn't worth that mobile friction.
-    folium.GeoJson(gdf[cols], name="gradient", style_function=style_function).add_to(m)
+    folium.GeoJson(
+        geojson,
+        name="gradient",
+        style_function=lambda feature: feature["properties"]["_style"],
+    ).add_to(m)
 
 
 def _add_highlight_layer(m: folium.Map, gdf: gpd.GeoDataFrame, selected_geoids: set[str]) -> None:

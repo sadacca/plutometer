@@ -24,13 +24,14 @@ from algorithm import expand_contiguous, find_nearest_geoid
 from data_loader import load_store
 from components.map_view import DEFAULT_ZOOM, build_map
 from components.utils import (
-    GEO_LABELS,
     LEVEL_LABELS,
     LEVEL_ORDER,
     TRACT_MIN_ZOOM,
     fmt_dollar,
     fmt_full,
+    fmt_houses,
     fmt_num,
+    geo_label,
     parse_value,
 )
 
@@ -115,13 +116,17 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     st.session_state.result_national_houses = national_houses
     st.session_state.marker = (lat, lon)
     st.session_state.status = (
-        f"{fmt_num(result.num_selected)} {GEO_LABELS.get(level, level).lower()} = {fmt_dollar(result.total_value)}"
+        f"{fmt_num(result.num_selected)} {geo_label(level, result.num_selected)} = {fmt_dollar(result.total_value)}"
         if result.num_selected > 0
         else "No geographies fit -- try a larger amount or zoom in."
     )
 
 
-def _tract_render_bbox(geo_data, geoids, marker, pad: float = 0.08) -> tuple[float, float, float, float] | None:
+TRACT_BBOX_PAD = 0.08  # degrees -- tight, neighborhood-scale context
+COUNTY_BBOX_PAD = 1.5  # degrees -- wider, so nearby counties stay visible for context
+
+
+def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float, float, float] | None:
     """Bounding box covering the given geoids' centroids (padded for context),
     or a small box around the marker if there's no selection yet. Deliberately
     *not* derived from the map's live pan/zoom bounds -- watching those as an
@@ -131,6 +136,13 @@ def _tract_render_bbox(geo_data, geoids, marker, pad: float = 0.08) -> tuple[flo
     which registers as a real pan and triggers another rerun, which remounts
     again... a cascade that never settles. A bbox computed from data we already
     trust (selection centroids, or the click point) has no such feedback path.
+
+    Used to clip both tract and county rendering to the area around the current
+    selection -- tract because its geometry isn't held in memory at all, county
+    because sending its 2MB+ nationwide GeoJSON on every rerun (typing in the
+    amount box, toggling the overlay radio, not just panning) is unnecessary
+    once a selection narrows down where on the map actually matters. Before any
+    selection exists, callers fall back to the level's full/national extent.
     """
     lons: list[float] = []
     lats: list[float] = []
@@ -188,20 +200,35 @@ with st.sidebar:
 
 # ------------------------------------------------------------------ main: header + map --
 # Informative text (title + result) stays compact above the map; interactive
-# controls live below it. Together they're kept to a couple of single lines
-# each so the map -- not text -- dominates the vertical space, especially on
-# a phone-height screen.
+# controls live below it. The result, when present, is the actual payoff of
+# the tool, so it gets two lines -- a bold headline equation sized above the
+# app title, then a caption with the "how many houses" context below it --
+# rather than one dense run-on line that buries the numbers.
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
 result = st.session_state.result
 if result is not None and result.num_selected > 0:
-    geo_label = GEO_LABELS.get(st.session_state.result_level, "geographies")
-    st.markdown(
-        f"**{fmt_num(result.num_selected)} {geo_label.lower()}** = {fmt_dollar(result.total_value)} "
-        f"&nbsp;·&nbsp; **{fmt_num(result.median_houses_to_target)}** homes at local median price "
-        f"&nbsp;·&nbsp; **{fmt_num(st.session_state.result_national_houses)}** at national median "
-        f"({fmt_dollar(st.session_state.result_national_median)})"
+    label = geo_label(st.session_state.result_level, result.num_selected)
+    st.markdown(f"#### {fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}")
+    st.caption(
+        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+        f" ({fmt_dollar(st.session_state.result_national_median)})"
+    )
+elif result is not None and result.area_median_home_value > 0:
+    # Target undercuts even the single smallest geography at the finest level
+    # reached (num_selected == 0) -- expand_contiguous still returns that
+    # geography's own median home value in this case (see its start_val >
+    # target_value short-circuit), so "how many houses could this buy" still
+    # has a real, if fractional, answer instead of a dead-end message.
+    label = geo_label(st.session_state.result_level, 1)
+    st.markdown(f"#### Smaller than a single {label} here")
+    st.caption(
+        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+        f" ({fmt_dollar(result.area_median_home_value)})"
+        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+        f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
 else:
     st.caption(st.session_state.status)
@@ -213,16 +240,20 @@ if st.session_state.result is not None and st.session_state.result_level == st.s
     selected_geoids = set(st.session_state.result.selected_geoids)
 
 render_gdf = None
+render_bbox = None
 if geo_data is not None:
     if st.session_state.geo_level == "tract":
         if st.session_state.map_zoom < TRACT_MIN_ZOOM:
             st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
         else:
-            tract_bbox = _tract_render_bbox(geo_data, selected_geoids, st.session_state.marker)
-            if tract_bbox is not None:
-                render_gdf = geo_data.viewport_gdf(tract_bbox)
+            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=TRACT_BBOX_PAD)
+            if render_bbox is not None:
+                render_gdf = geo_data.viewport_gdf(render_bbox)
             else:
                 st.caption("Tap the map to load neighborhood boundaries there.")
+    elif st.session_state.geo_level == "county":
+        render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=COUNTY_BBOX_PAD)
+        render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
     else:
         render_gdf = geo_data.full_gdf
 
@@ -232,6 +263,7 @@ fmap = build_map(
     selected_geoids=selected_geoids,
     marker_latlon=st.session_state.marker,
     zoom=st.session_state.map_zoom,
+    render_key=(st.session_state.geo_level, render_bbox),
 )
 
 # Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
