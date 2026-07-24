@@ -22,7 +22,7 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous, find_nearest_geoid
 from data_loader import load_store
-from components.map_view import DEFAULT_ZOOM, build_map
+from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
     LEVEL_LABELS,
     LEVEL_ORDER,
@@ -47,6 +47,7 @@ store = load_store()
 _STATE_DEFAULTS = {
     "marker": None,
     "map_zoom": DEFAULT_ZOOM,
+    "map_center": DEFAULT_CENTER,
     "last_clicked_processed": None,
     "result": None,
     "result_level": None,
@@ -177,6 +178,7 @@ with st.sidebar:
 
     if st.button("Clear Selection", disabled=st.session_state.marker is None, use_container_width=True):
         st.session_state.marker = None
+        st.session_state.map_center = DEFAULT_CENTER
         st.session_state.result = None
         st.session_state.last_clicked_processed = None
         st.session_state.status = "Selection cleared."
@@ -262,6 +264,7 @@ fmap = build_map(
     overlay_mode=overlay_mode,
     selected_geoids=selected_geoids,
     marker_latlon=st.session_state.marker,
+    center=st.session_state.map_center,
     zoom=st.session_state.map_zoom,
     render_key=(st.session_state.geo_level, render_bbox),
 )
@@ -319,6 +322,17 @@ if map_data:
         click_key = (round(clicked["lat"], 6), round(clicked["lng"], 6), target_value, st.session_state.geo_level)
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
+            # Recenter the *next* rebuilt map on the click itself, not just on a
+            # successful computation's marker -- otherwise a click made before
+            # the map is zoomed to TRACT_MIN_ZOOM (which can't run a computation
+            # yet, see the tract-zoom branch below) leaves the map's location
+            # pinned at DEFAULT_CENTER while the user tries to scroll-zoom in.
+            # Since "zoom" is a watched returned_object, every zoom tick reruns
+            # the script and rebuilds the folium.Map from scratch at whatever
+            # center/zoom we hand it -- so without this, each zoom step snaps
+            # the view back to the geographic center of the US instead of
+            # staying put over the spot the user actually clicked.
+            st.session_state.map_center = (clicked["lat"], clicked["lng"])
             if not target_value:
                 st.session_state.status = "Select or enter a total wealth amount below."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
