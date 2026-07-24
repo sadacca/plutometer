@@ -4,6 +4,12 @@ plutometer -- "How rich are the rich, really?"
 Streamlit entrypoint. Click a spot on the map, pick a dollar amount, and see
 the largest contiguous set of geographies (states / counties / neighborhoods)
 whose combined residential real-estate value doesn't exceed it.
+
+Mobile-first layout: the sidebar is collapsed by default and holds only
+settings (geography level, target value, overlay, and secondary detail
+expanders). The header, the primary "how many houses" result, and the map
+itself all live in the main column so the core click-to-see-result loop
+never requires opening the sidebar.
 """
 
 import sys
@@ -32,7 +38,7 @@ st.set_page_config(
     page_title="How rich are the rich, really?",
     page_icon="\U0001F3E0",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 store = load_store()
@@ -46,7 +52,7 @@ _STATE_DEFAULTS = {
     "result_level": None,
     "result_national_median": 0.0,
     "result_national_houses": 0.0,
-    "status": "Click the map to get started.",
+    "status": "Tap the map to get started.",
 }
 for _k, _v in _STATE_DEFAULTS.items():
     st.session_state.setdefault(_k, _v)
@@ -121,11 +127,13 @@ def _parse_bounds(map_data: dict) -> tuple[float, float, float, float] | None:
         return None
 
 
-# ---------------------------------------------------------------- sidebar: controls --
+# ---------------------------------------------------------------- sidebar: settings --
+# Collapsed by default (see set_page_config) -- everything the core loop needs
+# (header, result, map) lives in the main column below, so the sidebar is only
+# needed to change settings or dig into secondary detail.
 
 with st.sidebar:
-    st.title("How rich are the rich, really?")
-    st.caption("See wealth mapped onto real neighborhoods")
+    st.markdown("##### ⚙️ Settings")
 
     available_levels = [lvl for lvl in LEVEL_ORDER if store.get_level(lvl) is not None]
     if not available_levels:
@@ -161,6 +169,39 @@ with st.sidebar:
         st.session_state.last_clicked_processed = None
         st.session_state.status = "Selection cleared."
         st.rerun()
+
+    result = st.session_state.result
+    if result is not None and result.num_selected > 0:
+        with st.expander("Selection details"):
+            st.write(f"Total value of area: {fmt_full(result.total_value)}")
+            st.write(f"Total wealth compared: {fmt_full(result.target_value)}")
+            st.write(f"Remaining: {fmt_full(result.remaining_budget)}")
+            st.write(f"Furthest distance: {result.furthest_distance_km:.1f} km")
+
+        with st.expander("Area statistics"):
+            st.write(f"Median household income: {fmt_full(result.area_median_income)}")
+            st.write(f"Median home value: {fmt_full(result.area_median_home_value)}")
+            st.write(f"Total housing units: {fmt_num(result.area_total_housing_units)}")
+
+    with st.expander("About this tool"):
+        st.markdown(store.educational_content or "_No educational content found._")
+
+# ------------------------------------------------------------------ main: header + result --
+
+st.markdown("##### \U0001F3E0 How rich are the rich, really?")
+
+result = st.session_state.result
+if result is not None and result.num_selected > 0:
+    geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Homes at local median", f"{fmt_num(result.median_houses_to_target)}")
+    r2.metric(geo_label, fmt_num(result.num_selected))
+    r3.metric(
+        "Homes at national median",
+        fmt_num(st.session_state.result_national_houses),
+        help=f"National median home price: {fmt_dollar(st.session_state.result_national_median)}",
+    )
+st.caption(st.session_state.status)
 
 # ------------------------------------------------------------------ main: map --
 
@@ -205,7 +246,7 @@ if st.session_state.geo_level == "tract":
 
 map_data = st_folium(
     fmap,
-    height=700,
+    height=520,
     use_container_width=True,
     returned_objects=watched,
     key="plutometer_map",
@@ -224,39 +265,9 @@ if map_data:
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
             if not target_value:
-                st.session_state.status = "Select or enter a total wealth amount."
+                st.session_state.status = "Select or enter a total wealth amount in Settings."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
                 _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
                 st.rerun()
-
-# ---------------------------------------------------------------- sidebar: results --
-
-with st.sidebar:
-    result = st.session_state.result
-    if result is not None and result.num_selected > 0:
-        st.markdown("#### How many houses could you buy?")
-        st.metric("At local median price", f"{fmt_num(result.median_houses_to_target)} homes")
-        st.caption(
-            f"At national median price: {fmt_num(st.session_state.result_national_houses)} homes "
-            f"({fmt_dollar(st.session_state.result_national_median)} ea.)"
-        )
-        geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
-        st.markdown(f"**{geo_label}:** {fmt_num(result.num_selected)}")
-
-        with st.expander("Selection details"):
-            st.write(f"Total value of area: {fmt_full(result.total_value)}")
-            st.write(f"Total wealth compared: {fmt_full(result.target_value)}")
-            st.write(f"Remaining: {fmt_full(result.remaining_budget)}")
-            st.write(f"Furthest distance: {result.furthest_distance_km:.1f} km")
-
-        with st.expander("Area statistics"):
-            st.write(f"Median household income: {fmt_full(result.area_median_income)}")
-            st.write(f"Median home value: {fmt_full(result.area_median_home_value)}")
-            st.write(f"Total housing units: {fmt_num(result.area_total_housing_units)}")
-
-    with st.expander("About this tool"):
-        st.markdown(store.educational_content or "_No educational content found._")
-
-    st.caption(st.session_state.status)
