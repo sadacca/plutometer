@@ -1,0 +1,14 @@
+# primaryColor mirrors the highlight/orange accent used for selected geographies
+# on the map (components/utils.py: HIGHLIGHT_FILL/HIGHLIGHT_BORDER).
+[theme]
+primaryColor = "#F57C00"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8F9FA"
+textColor = "#1A1A1A"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

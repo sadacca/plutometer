@@ -1,0 +1,41 @@
+name: CI (algorithm tests + app import smoke test)
+
+# The "build" gate before Streamlit Community Cloud auto-deploys from main.
+# It never touches Census data or the network -- just the pure algorithm
+# tests and a syntax/import check of the app modules.
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run algorithm tests
+        run: pytest tests/ -v
+
+      - name: Smoke-check app modules
+        run: |
+          python -m py_compile app/app.py
+          python -c "
+          import sys
+          sys.path.insert(0, 'app')
+          import algorithm
+          import data_loader
+          import components.utils
+          import components.map_view
+          print('app modules import cleanly')
+          "
