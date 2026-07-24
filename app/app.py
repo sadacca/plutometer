@@ -123,8 +123,24 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     )
 
 
-TRACT_BBOX_PAD = 0.08  # degrees -- tight, neighborhood-scale context
-COUNTY_BBOX_PAD = 1.5  # degrees -- wider, so nearby counties stay visible for context
+TRACT_BBOX_FLOOR_PAD = 0.08  # degrees -- floor once zoomed in close (neighborhood-scale)
+TRACT_BBOX_BASE_PAD = 1.0  # degrees -- pad right at TRACT_MIN_ZOOM, so the first tract
+                            # view covers a decent-sized region instead of a tiny sliver
+COUNTY_BBOX_FLOOR_PAD = 0.15  # degrees -- floor once zoomed in close
+COUNTY_BBOX_BASE_PAD = 1.5  # degrees -- pad just past COUNTY_FULL_ZOOM_MAX
+COUNTY_FULL_ZOOM_MAX = 6  # at/below this zoom, county is already fully in memory and
+                           # cheap to render whole -- no need to clip to a bbox at all
+
+
+def _zoom_scaled_pad(zoom: int, ref_zoom: int, ref_pad: float, floor_pad: float) -> float:
+    """Bbox padding (degrees) that halves for each zoom level above ref_zoom and doubles
+    for each below it, floored at floor_pad. Web Mercator halves degrees-per-pixel for
+    every +1 zoom level, so this makes the render bbox roughly track what's actually
+    visible on screen instead of a fixed constant -- too tight once zoomed out (missing
+    context that's genuinely on screen) and unnecessarily wide once zoomed in (bloating
+    the GeoJSON sent to the browser for no visible gain).
+    """
+    return max(floor_pad, ref_pad * (2 ** (ref_zoom - zoom)))
 
 
 def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float, float, float] | None:
@@ -248,14 +264,26 @@ if geo_data is not None:
         if st.session_state.map_zoom < TRACT_MIN_ZOOM:
             st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
         else:
-            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=TRACT_BBOX_PAD)
+            pad = _zoom_scaled_pad(
+                st.session_state.map_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD
+            )
+            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
             if render_bbox is not None:
                 render_gdf = geo_data.viewport_gdf(render_bbox)
             else:
                 st.caption("Tap the map to load neighborhood boundaries there.")
     elif st.session_state.geo_level == "county":
-        render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=COUNTY_BBOX_PAD)
-        render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
+        if st.session_state.map_zoom <= COUNTY_FULL_ZOOM_MAX:
+            # Zoomed out to (near) a national view -- county is already fully in memory
+            # and cheap to render whole, so show every county instead of clipping to a
+            # bbox that would cut off most of the country.
+            render_gdf = geo_data.full_gdf
+        else:
+            pad = _zoom_scaled_pad(
+                st.session_state.map_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
+            )
+            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
+            render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
     else:
         render_gdf = geo_data.full_gdf
 
