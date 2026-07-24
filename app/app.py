@@ -203,6 +203,15 @@ with st.sidebar:
     result = st.session_state.result
     if result is not None and result.num_selected > 0:
         with st.expander("Selection details"):
+            # Named places, not just a count -- grounds the abstract number in
+            # the same real geographies the map is highlighting.
+            result_geo_data = store.get_level(st.session_state.result_level)
+            if result_geo_data is not None:
+                names = [result_geo_data.names.get(g, g) for g in result.selected_geoids]
+                shown = ", ".join(names[:10])
+                if len(names) > 10:
+                    shown += f", and {len(names) - 10} more"
+                st.write(f"Includes: {shown}")
             st.write(f"Total value of area: {fmt_full(result.total_value)}")
             st.write(f"Total wealth compared: {fmt_full(result.target_value)}")
             st.write(f"Remaining: {fmt_full(result.remaining_budget)}")
@@ -253,6 +262,23 @@ elif result is not None and result.area_median_home_value > 0:
     )
 else:
     st.caption(st.session_state.status)
+
+if st.session_state.marker is not None:
+    # A one-line "where am I" anchor -- most useful at tract zoom, where the
+    # visible map area is a tiny sliver with no broader context on screen.
+    # County NAME already includes the state (e.g. "Alameda County,
+    # California"), so a single nearest-county lookup is enough; this is
+    # independent of the currently selected geo_level so it still works
+    # while viewing state- or tract-level results.
+    county_data = store.get_level("county")
+    if county_data is not None and county_data.centroids:
+        lat, lon = st.session_state.marker
+        nearest_county = find_nearest_geoid(lat, lon, county_data.centroids)
+        county_name = county_data.names.get(nearest_county)
+        if county_name:
+            st.caption(f"\U0001F4CD Viewing: {county_name}")
+
+st.caption("Based on 2017–2021 Census estimates — order-of-magnitude, not exact.")
 
 geo_data = store.get_level(st.session_state.geo_level)
 
@@ -330,6 +356,10 @@ with c1:
         options=available_levels,
         format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
         key="geo_level",
+        help=(
+            "State and County cover the whole country at any zoom. "
+            f"Neighborhood (Census tract) needs the map zoomed to level {TRACT_MIN_ZOOM}+ first."
+        ),
     )
 with c2:
     # Categories preserve reference_values.csv's row order (dict.fromkeys
@@ -339,7 +369,13 @@ with c2:
     categories = list(dict.fromkeys(r["category"] for r in store.reference_values))
     default_category = "Super-Rich Individuals"
     category_index = categories.index(default_category) if default_category in categories else 0
-    wealth_category = st.selectbox("Wealth Category", options=categories, index=category_index, key="wealth_category")
+    wealth_category = st.selectbox(
+        "Wealth Category",
+        options=categories,
+        index=category_index,
+        key="wealth_category",
+        help="Pick a theme, then a specific amount within it below.",
+    )
 
     filtered = [r for r in store.reference_values if r["category"] == wealth_category]
     ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in filtered}
@@ -354,9 +390,15 @@ with c2:
         "Amount", options=ref_labels, index=ref_labels.index(default_label), key=f"wealth_amount_{wealth_category}"
     )
 with c3:
-    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
+    custom_raw = st.text_input(
+        "Custom amount",
+        placeholder="e.g. 500B or 1.5T",
+        help="Overrides the dropdown above. Accepts K/M/B/T shorthand, e.g. 500B or 1.5T.",
+    )
+    custom_parsed = parse_value(custom_raw)
+    if custom_raw and custom_parsed is None:
+        st.caption("Couldn't read that — try formats like 500B or 1.5T")
 
-custom_parsed = parse_value(custom_raw)
 target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
 
 if map_data:

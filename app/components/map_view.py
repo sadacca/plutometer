@@ -42,7 +42,7 @@ def build_map(
         _add_gradient_layer(m, render_gdf, overlay_mode, render_key)
         if selected_geoids:
             _add_highlight_layer(m, render_gdf, selected_geoids)
-        _add_legend(m, overlay_mode)
+        _add_legend(m, overlay_mode, has_selection=bool(selected_geoids))
 
     if marker_latlon is not None:
         # A plain folium.Marker() uses Leaflet's default raster pin icon,
@@ -126,20 +126,38 @@ def _add_highlight_layer(m: folium.Map, gdf: gpd.GeoDataFrame, selected_geoids: 
     folium.GeoJson(sub[["GEOID", "geometry"]], name="highlight", style_function=style_function).add_to(m)
 
 
-def _add_legend(m: folium.Map, overlay_mode: str) -> None:
-    if overlay_mode == "none":
+def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
+    """Price-gradient key, a "your selection" color key, or both -- whichever apply. Skips
+    entirely if there's nothing to explain (no fill and no selection), rather than always
+    reserving map space for an empty box.
+    """
+    sections: list[str] = []
+    if overlay_mode != "none":
+        label = _OVERLAY_LABEL[overlay_mode]
+        sections.append(f"""
+          <div style="font-weight:600;margin-bottom:2px;">{label}</div>
+          <div style="width:120px;height:12px;border-radius:2px;margin:4px 0;
+                      background:linear-gradient(to right, rgb(255,240,30), rgb(25,118,210));"></div>
+          <div style="display:flex;justify-content:space-between;color:#666;width:120px;">
+            <span>Low</span><span>High</span>
+          </div>
+        """)
+    if has_selection:
+        margin_top = "6px" if sections else "0"
+        sections.append(f"""
+          <div style="display:flex;align-items:center;gap:6px;margin-top:{margin_top};">
+            <span style="width:12px;height:12px;border-radius:2px;display:inline-block;
+                        background:{HIGHLIGHT_FILL};border:1.5px solid {HIGHLIGHT_BORDER};"></span>
+            <span>Your selection</span>
+          </div>
+        """)
+    if not sections:
         return
-    label = _OVERLAY_LABEL[overlay_mode]
     html = f"""
     <div style="position: fixed; bottom: 20px; left: 20px; z-index: 9999;
                 background: white; border-radius: 6px; padding: 8px 10px;
                 box-shadow: 0 1px 5px rgba(0,0,0,0.25); font-size: 11px; line-height: 1.4;">
-      <div style="font-weight:600;margin-bottom:2px;">{label}</div>
-      <div style="width:120px;height:12px;border-radius:2px;margin:4px 0;
-                  background:linear-gradient(to right, rgb(255,240,30), rgb(25,118,210));"></div>
-      <div style="display:flex;justify-content:space-between;color:#666;width:120px;">
-        <span>Low</span><span>High</span>
-      </div>
+      {''.join(sections)}
     </div>
     """
     m.get_root().html.add_child(folium.Element(html))
