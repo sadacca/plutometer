@@ -22,7 +22,7 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous, find_nearest_geoid
 from data_loader import load_store
-from components.map_view import DEFAULT_ZOOM, build_map
+from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
     LEVEL_LABELS,
     LEVEL_ORDER,
@@ -42,11 +42,70 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Translucent accent tints (not solid colors) so these read correctly against
+# both Streamlit's light and dark palettes -- see the comment in
+# .streamlit/config.toml on why backgroundColor/textColor are left unset.
+# Text color is never set explicitly; it inherits Streamlit's own themed
+# color. The map iframe is targeted by its component title attribute
+# (stable across reruns -- streamlit-folium always names it this) rather
+# than a generated class, since Streamlit doesn't expose a way to attach a
+# custom class to a component's own wrapper.
+st.markdown(
+    """
+    <style>
+    @keyframes pm-fade-in {
+      0%   { opacity: 0; transform: translateY(4px) scale(0.98); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .pm-stat-card {
+      background: rgba(245, 124, 0, 0.08);
+      border: 1px solid rgba(245, 124, 0, 0.35);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 4px 0 10px 0;
+      animation: pm-fade-in 0.35s ease-out;
+    }
+    .pm-stat-headline {
+      font-size: 1.4rem;
+      font-weight: 700;
+      line-height: 1.3;
+      margin: 0 0 4px 0;
+    }
+    .pm-stat-caption {
+      font-size: 0.85rem;
+      opacity: 0.75;
+      line-height: 1.4;
+    }
+    .pm-empty-banner {
+      background: rgba(245, 124, 0, 0.05);
+      border: 1.5px dashed rgba(245, 124, 0, 0.4);
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin: 4px 0 10px 0;
+      font-size: 0.92rem;
+      opacity: 0.85;
+    }
+    iframe[title="streamlit_folium.st_folium"] {
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 14px rgba(0, 0, 0, 0.14);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      /* streamlit-folium sets the iframe's real height itself once its JS
+         finishes mounting -- this floor just stops the bordered/shadowed
+         frame rendering as a broken sliver during that brief window. */
+      min-height: 200px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 store = load_store()
 
 _STATE_DEFAULTS = {
     "marker": None,
     "map_zoom": DEFAULT_ZOOM,
+    "map_center": DEFAULT_CENTER,
     "last_clicked_processed": None,
     "result": None,
     "result_level": None,
@@ -69,6 +128,16 @@ if not available_levels:
     st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
     st.stop()
 st.session_state.setdefault("geo_level", available_levels[0])
+
+
+def _stat_card_html(headline: str, caption: str) -> str:
+    """The primary result, styled as a standalone card (see the injected .pm-stat-card
+    CSS above) instead of a plain markdown header -- the actual payoff of the tool
+    deserves more visual weight than the surrounding text. caption may contain simple
+    <strong> tags; both args are always built from this module's own formatted numbers/
+    labels, never raw user input, so interpolating them directly is safe here.
+    """
+    return f'<div class="pm-stat-card"><div class="pm-stat-headline">{headline}</div><div class="pm-stat-caption">{caption}</div></div>'
 
 
 def _run_computation(lat: float, lon: float, target_value: float, level: str, depth: int = 0) -> None:
@@ -122,8 +191,24 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     )
 
 
-TRACT_BBOX_PAD = 0.08  # degrees -- tight, neighborhood-scale context
-COUNTY_BBOX_PAD = 1.5  # degrees -- wider, so nearby counties stay visible for context
+TRACT_BBOX_FLOOR_PAD = 0.08  # degrees -- floor once zoomed in close (neighborhood-scale)
+TRACT_BBOX_BASE_PAD = 1.0  # degrees -- pad right at TRACT_MIN_ZOOM, so the first tract
+                            # view covers a decent-sized region instead of a tiny sliver
+COUNTY_BBOX_FLOOR_PAD = 0.15  # degrees -- floor once zoomed in close
+COUNTY_BBOX_BASE_PAD = 1.5  # degrees -- pad just past COUNTY_FULL_ZOOM_MAX
+COUNTY_FULL_ZOOM_MAX = 6  # at/below this zoom, county is already fully in memory and
+                           # cheap to render whole -- no need to clip to a bbox at all
+
+
+def _zoom_scaled_pad(zoom: int, ref_zoom: int, ref_pad: float, floor_pad: float) -> float:
+    """Bbox padding (degrees) that halves for each zoom level above ref_zoom and doubles
+    for each below it, floored at floor_pad. Web Mercator halves degrees-per-pixel for
+    every +1 zoom level, so this makes the render bbox roughly track what's actually
+    visible on screen instead of a fixed constant -- too tight once zoomed out (missing
+    context that's genuinely on screen) and unnecessarily wide once zoomed in (bloating
+    the GeoJSON sent to the browser for no visible gain).
+    """
+    return max(floor_pad, ref_pad * (2 ** (ref_zoom - zoom)))
 
 
 def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float, float, float] | None:
@@ -177,6 +262,7 @@ with st.sidebar:
 
     if st.button("Clear Selection", disabled=st.session_state.marker is None, use_container_width=True):
         st.session_state.marker = None
+        st.session_state.map_center = DEFAULT_CENTER
         st.session_state.result = None
         st.session_state.last_clicked_processed = None
         st.session_state.status = "Selection cleared."
@@ -185,6 +271,15 @@ with st.sidebar:
     result = st.session_state.result
     if result is not None and result.num_selected > 0:
         with st.expander("Selection details"):
+            # Named places, not just a count -- grounds the abstract number in
+            # the same real geographies the map is highlighting.
+            result_geo_data = store.get_level(st.session_state.result_level)
+            if result_geo_data is not None:
+                names = [result_geo_data.names.get(g, g) for g in result.selected_geoids]
+                shown = ", ".join(names[:10])
+                if len(names) > 10:
+                    shown += f", and {len(names) - 10} more"
+                st.write(f"Includes: {shown}")
             st.write(f"Total value of area: {fmt_full(result.total_value)}")
             st.write(f"Total wealth compared: {fmt_full(result.target_value)}")
             st.write(f"Remaining: {fmt_full(result.remaining_budget)}")
@@ -195,8 +290,11 @@ with st.sidebar:
             st.write(f"Median home value: {fmt_full(result.area_median_home_value)}")
             st.write(f"Total housing units: {fmt_num(result.area_total_housing_units)}")
 
-    with st.expander("About this tool"):
+    about_tab, scale_tab = st.tabs(["About this tool", "What does a dollar buy?"])
+    with about_tab:
         st.markdown(store.educational_content or "_No educational content found._")
+    with scale_tab:
+        st.markdown(store.scale_reference_content or "_No content found._")
 
 # ------------------------------------------------------------------ main: header + map --
 # Informative text (title + result) stays compact above the map; interactive
@@ -210,12 +308,13 @@ st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 result = st.session_state.result
 if result is not None and result.num_selected > 0:
     label = geo_label(st.session_state.result_level, result.num_selected)
-    st.markdown(f"#### {fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}")
-    st.caption(
-        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
-        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+    headline = f"{fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}"
+    caption = (
+        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
+        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
         f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
+    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
 elif result is not None and result.area_median_home_value > 0:
     # Target undercuts even the single smallest geography at the finest level
     # reached (num_selected == 0) -- expand_contiguous still returns that
@@ -223,15 +322,33 @@ elif result is not None and result.area_median_home_value > 0:
     # target_value short-circuit), so "how many houses could this buy" still
     # has a real, if fractional, answer instead of a dead-end message.
     label = geo_label(st.session_state.result_level, 1)
-    st.markdown(f"#### Smaller than a single {label} here")
-    st.caption(
-        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+    headline = f"Smaller than a single {label} here"
+    caption = (
+        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
         f" ({fmt_dollar(result.area_median_home_value)})"
-        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
         f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
+    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
 else:
-    st.caption(st.session_state.status)
+    st.markdown(f'<div class="pm-empty-banner">{st.session_state.status}</div>', unsafe_allow_html=True)
+
+if st.session_state.marker is not None:
+    # A one-line "where am I" anchor -- most useful at tract zoom, where the
+    # visible map area is a tiny sliver with no broader context on screen.
+    # County NAME already includes the state (e.g. "Alameda County,
+    # California"), so a single nearest-county lookup is enough; this is
+    # independent of the currently selected geo_level so it still works
+    # while viewing state- or tract-level results.
+    county_data = store.get_level("county")
+    if county_data is not None and county_data.centroids:
+        lat, lon = st.session_state.marker
+        nearest_county = find_nearest_geoid(lat, lon, county_data.centroids)
+        county_name = county_data.names.get(nearest_county)
+        if county_name:
+            st.caption(f"\U0001F4CD Viewing: {county_name}")
+
+st.caption("Based on 2017–2021 Census estimates — order-of-magnitude, not exact.")
 
 geo_data = store.get_level(st.session_state.geo_level)
 
@@ -246,14 +363,26 @@ if geo_data is not None:
         if st.session_state.map_zoom < TRACT_MIN_ZOOM:
             st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
         else:
-            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=TRACT_BBOX_PAD)
+            pad = _zoom_scaled_pad(
+                st.session_state.map_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD
+            )
+            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
             if render_bbox is not None:
                 render_gdf = geo_data.viewport_gdf(render_bbox)
             else:
                 st.caption("Tap the map to load neighborhood boundaries there.")
     elif st.session_state.geo_level == "county":
-        render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=COUNTY_BBOX_PAD)
-        render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
+        if st.session_state.map_zoom <= COUNTY_FULL_ZOOM_MAX:
+            # Zoomed out to (near) a national view -- county is already fully in memory
+            # and cheap to render whole, so show every county instead of clipping to a
+            # bbox that would cut off most of the country.
+            render_gdf = geo_data.full_gdf
+        else:
+            pad = _zoom_scaled_pad(
+                st.session_state.map_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
+            )
+            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
+            render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
     else:
         render_gdf = geo_data.full_gdf
 
@@ -262,6 +391,7 @@ fmap = build_map(
     overlay_mode=overlay_mode,
     selected_geoids=selected_geoids,
     marker_latlon=st.session_state.marker,
+    center=st.session_state.map_center,
     zoom=st.session_state.map_zoom,
     render_key=(st.session_state.geo_level, render_bbox),
 )
@@ -296,18 +426,49 @@ with c1:
         options=available_levels,
         format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
         key="geo_level",
+        help=(
+            "State and County cover the whole country at any zoom. "
+            f"Neighborhood (Census tract) needs the map zoomed to level {TRACT_MIN_ZOOM}+ first."
+        ),
     )
 with c2:
-    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
-    ref_labels = ["-- Select --", *ref_options.keys()]
+    # Categories preserve reference_values.csv's row order (dict.fromkeys
+    # dedupes while keeping first-seen order) rather than sorting
+    # alphabetically, so related categories stay grouped the way the CSV
+    # author intended (percentiles first, national-scale figures last).
+    categories = list(dict.fromkeys(r["category"] for r in store.reference_values))
+    default_category = "Super-Rich Individuals"
+    category_index = categories.index(default_category) if default_category in categories else 0
+    wealth_category = st.selectbox(
+        "Wealth Category",
+        options=categories,
+        index=category_index,
+        key="wealth_category",
+        help="Pick a theme, then a specific amount within it below.",
+    )
+
+    filtered = [r for r in store.reference_values if r["category"] == wealth_category]
+    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in filtered}
+    ref_labels = list(ref_options.keys())
     # Default to Elon Musk's net worth so there's always a result to look at
     # on first load, instead of a blank "-- Select --" state.
     default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
-    ref_choice = st.selectbox("Total Wealth", options=ref_labels, index=ref_labels.index(default_label))
+    # Keying on the category makes this a fresh widget whenever the category
+    # changes, so its selection can't get stuck pointing at an index/value
+    # that belonged to the previous category's option list.
+    ref_choice = st.selectbox(
+        "Amount", options=ref_labels, index=ref_labels.index(default_label), key=f"wealth_amount_{wealth_category}"
+    )
 with c3:
-    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
+    custom_raw = st.text_input(
+        "Custom amount",
+        placeholder="e.g. 500B or 1.5T",
+        help="Overrides the dropdown above. Accepts K/M/B/T shorthand, e.g. 500B or 1.5T.",
+    )
+    custom_parsed = parse_value(custom_raw)
+    if custom_raw and custom_parsed is None:
+        st.caption("Couldn't read that — try formats like 500B or 1.5T")
 
-custom_parsed = parse_value(custom_raw)
 target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
 
 if map_data:
@@ -319,10 +480,22 @@ if map_data:
         click_key = (round(clicked["lat"], 6), round(clicked["lng"], 6), target_value, st.session_state.geo_level)
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
+            # Recenter the *next* rebuilt map on the click itself, not just on a
+            # successful computation's marker -- otherwise a click made before
+            # the map is zoomed to TRACT_MIN_ZOOM (which can't run a computation
+            # yet, see the tract-zoom branch below) leaves the map's location
+            # pinned at DEFAULT_CENTER while the user tries to scroll-zoom in.
+            # Since "zoom" is a watched returned_object, every zoom tick reruns
+            # the script and rebuilds the folium.Map from scratch at whatever
+            # center/zoom we hand it -- so without this, each zoom step snaps
+            # the view back to the geographic center of the US instead of
+            # staying put over the spot the user actually clicked.
+            st.session_state.map_center = (clicked["lat"], clicked["lng"])
             if not target_value:
                 st.session_state.status = "Select or enter a total wealth amount below."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
-                _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
+                with st.spinner("Finding the largest area that fits..."):
+                    _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
                 st.rerun()

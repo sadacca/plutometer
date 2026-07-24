@@ -122,6 +122,7 @@ class DataStore:
         self.levels: dict[str, GeographyData] = {}
         self.reference_values: list[dict] = []
         self.educational_content: str = ""
+        self.scale_reference_content: str = ""
         self.national_median_home_value: float = 0.0
 
     def get_level(self, level: str) -> GeographyData | None:
@@ -140,6 +141,10 @@ def load_store() -> DataStore:
     edu_path = DATA_DIR / "educational_content.md"
     if edu_path.exists():
         store.educational_content = edu_path.read_text()
+
+    scale_path = DATA_DIR / "scale_reference.md"
+    if scale_path.exists():
+        store.scale_reference_content = scale_path.read_text()
 
     # State + county: small enough to hold the full GeoDataFrame in memory.
     for level in ["state", "county"]:

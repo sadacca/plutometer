@@ -1,10 +1,16 @@
 # primaryColor mirrors the highlight/orange accent used for selected geographies
 # on the map (components/utils.py: HIGHLIGHT_FILL/HIGHLIGHT_BORDER).
+#
+# Deliberately no backgroundColor/secondaryBackgroundColor/textColor here:
+# setting those pins the app to a single light palette and disables
+# Streamlit's native light/dark theme toggle entirely. Leaving them unset
+# lets Streamlit apply primaryColor to both its built-in light and dark
+# palettes, so the toggle (and the user's system preference) works. Custom
+# CSS injected in app.py/components/map_view.py uses translucent accent
+# tints rather than hardcoded background/text colors for the same reason --
+# they need to read correctly against either palette.
 [theme]
 primaryColor = "#F57C00"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F8F9FA"
-textColor = "#1A1A1A"
 font = "sans serif"
 
 [server]
