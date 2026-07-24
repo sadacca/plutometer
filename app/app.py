@@ -173,8 +173,24 @@ with st.sidebar:
         st.markdown(store.educational_content or "_No educational content found._")
 
 # ------------------------------------------------------------------ main: header + map --
+# Informative text (title + result) stays compact above the map; interactive
+# controls live below it. Together they're kept to a couple of single lines
+# each so the map -- not text -- dominates the vertical space, especially on
+# a phone-height screen.
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
+
+result = st.session_state.result
+if result is not None and result.num_selected > 0:
+    geo_label = GEO_LABELS.get(st.session_state.result_level, "geographies")
+    st.markdown(
+        f"**{fmt_num(result.num_selected)} {geo_label.lower()}** = {fmt_dollar(result.total_value)} "
+        f"&nbsp;·&nbsp; **{fmt_num(result.median_houses_to_target)}** homes at local median price "
+        f"&nbsp;·&nbsp; **{fmt_num(st.session_state.result_national_houses)}** at national median "
+        f"({fmt_dollar(st.session_state.result_national_median)})"
+    )
+else:
+    st.caption(st.session_state.status)
 
 geo_data = store.get_level(st.session_state.geo_level)
 
@@ -217,18 +233,19 @@ if st.session_state.geo_level == "tract":
 
 map_data = st_folium(
     fmap,
-    height=480,
+    height=560,
     use_container_width=True,
     returned_objects=watched,
     key="plutometer_map",
 )
 
-# ----------------------------------------------------------- main: controls + result --
-# Placed below the map (not above, not in the sidebar) so the map is the
-# first thing seen on a vertical/mobile screen, and picking a level/amount +
-# reading the result never requires opening the sidebar.
+# ----------------------------------------------------------- main: controls --
+# Interactive controls below the map (not above, not in the sidebar) so the
+# map is the first thing seen on a vertical/mobile screen. One row, three
+# columns -- auto-stacks to full width on narrow viewports -- to keep this
+# section as short as the result line above the map.
 
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 with c1:
     geo_level = st.selectbox(
         "Geography Level",
@@ -239,9 +256,8 @@ with c1:
 with c2:
     ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
     ref_choice = st.selectbox("Total Wealth", options=["-- Select --", *ref_options.keys()])
-
-custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
-st.caption("Supports K, M, B, T (e.g. 500B = $500 billion)")
+with c3:
+    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
 
 custom_parsed = parse_value(custom_raw)
 target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
@@ -259,22 +275,9 @@ if map_data:
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
             if not target_value:
-                st.session_state.status = "Select or enter a total wealth amount above."
+                st.session_state.status = "Select or enter a total wealth amount below."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
                 _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
                 st.rerun()
-
-result = st.session_state.result
-if result is not None and result.num_selected > 0:
-    geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Homes at local median", f"{fmt_num(result.median_houses_to_target)}")
-    r2.metric(geo_label, fmt_num(result.num_selected))
-    r3.metric(
-        "Homes at national median",
-        fmt_num(st.session_state.result_national_houses),
-        help=f"National median home price: {fmt_dollar(st.session_state.result_national_median)}",
-    )
-st.caption(st.session_state.status)
