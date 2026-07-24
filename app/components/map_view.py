@@ -44,7 +44,7 @@ def _add_gradient_layer(m: folium.Map, gdf: gpd.GeoDataFrame, overlay_mode: str)
     if overlay_mode == "none":
 
         def style_function(_feature):
-            return {"color": "#999", "weight": 0.5, "fillOpacity": 0}
+            return {"color": "#9AA5B1", "weight": 0.6, "fillOpacity": 0}
 
     else:
         field = _OVERLAY_FIELD[overlay_mode]
@@ -54,27 +54,18 @@ def _add_gradient_layer(m: folium.Map, gdf: gpd.GeoDataFrame, overlay_mode: str)
         def style_function(feature, field=field, vmin=vmin, vmax=vmax):
             v = feature["properties"].get(field) or 0
             fill = price_color(v, vmin, vmax) if v > 0 else "#f0f0f0"
-            return {"color": "#aaa", "weight": 0.3, "fillColor": fill, "fillOpacity": 0.5}
+            # Thin, near-invisible borders so filled regions read as a smooth
+            # choropleth instead of a grid of outlined boxes -- the fill color
+            # differences alone carry the shape boundaries.
+            return {"color": "#ffffff", "weight": 0.4, "opacity": 0.5, "fillColor": fill, "fillOpacity": 0.6}
 
-    tooltip_fields = [f for f in ["NAME", "total_value", "median_home_value", "median_income"] if f in gdf.columns]
-    tooltip_aliases = {
-        "NAME": "Name:",
-        "total_value": "Total value:",
-        "median_home_value": "Median home:",
-        "median_income": "Median income:",
-    }
     cols = [c for c in ["GEOID", "NAME", "total_value", "median_home_value", "median_income", "geometry"] if c in gdf.columns]
 
-    folium.GeoJson(
-        gdf[cols],
-        name="gradient",
-        style_function=style_function,
-        tooltip=folium.GeoJsonTooltip(
-            fields=tooltip_fields,
-            aliases=[tooltip_aliases[f] for f in tooltip_fields],
-            sticky=True,
-        ) if tooltip_fields else None,
-    ).add_to(m)
+    # No hover tooltip: on touch devices a tap first triggers hover/tooltip
+    # rather than the click handler, so every selection would need a double
+    # tap. Full detail is already available in the results panel after a
+    # click -- a hover-only affordance isn't worth that mobile friction.
+    folium.GeoJson(gdf[cols], name="gradient", style_function=style_function).add_to(m)
 
 
 def _add_highlight_layer(m: folium.Map, gdf: gpd.GeoDataFrame, selected_geoids: set[str]) -> None:
