@@ -27,7 +27,7 @@ jobs:
           cache: pip
 
       - name: Install pipeline dependencies
-        run: pip install pandas numpy geopandas shapely requests pyogrio
+        run: pip install pandas pyarrow numpy geopandas shapely requests pyogrio
 
       - name: Configure git identity
         run: |
