@@ -6,10 +6,10 @@ the largest contiguous set of geographies (states / counties / neighborhoods)
 whose combined residential real-estate value doesn't exceed it.
 
 Mobile-first layout: the sidebar is collapsed by default and holds only
-settings (geography level, target value, overlay, and secondary detail
-expanders). The header, the primary "how many houses" result, and the map
-itself all live in the main column so the core click-to-see-result loop
-never requires opening the sidebar.
+secondary settings (overlay mode, clear button, detail expanders). The
+header, the map, the core controls (geography level, target value), and the
+primary "how many houses" result all live in the main column, map first, so
+the whole click-to-see-result loop never requires opening the sidebar.
 """
 
 import sys
@@ -63,6 +63,12 @@ for _k, _v in _STATE_DEFAULTS.items():
 _pending_level = st.session_state.pop("pending_geo_level", None)
 if _pending_level is not None:
     st.session_state["geo_level"] = _pending_level
+
+available_levels = [lvl for lvl in LEVEL_ORDER if store.get_level(lvl) is not None]
+if not available_levels:
+    st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
+    st.stop()
+st.session_state.setdefault("geo_level", available_levels[0])
 
 
 def _run_computation(lat: float, lon: float, target_value: float, level: str, depth: int = 0) -> None:
@@ -127,34 +133,14 @@ def _parse_bounds(map_data: dict) -> tuple[float, float, float, float] | None:
         return None
 
 
-# ---------------------------------------------------------------- sidebar: settings --
-# Collapsed by default (see set_page_config) -- everything the core loop needs
-# (header, result, map) lives in the main column below, so the sidebar is only
-# needed to change settings or dig into secondary detail.
+# ---------------------------------------------------------------- sidebar: secondary --
+# Collapsed by default (see set_page_config). The core loop -- header, map,
+# level/amount controls, and the primary result -- all lives in the main
+# column below, so the sidebar is only needed for the overlay toggle or to
+# dig into secondary detail.
 
 with st.sidebar:
-    st.markdown("##### ⚙️ Settings")
-
-    available_levels = [lvl for lvl in LEVEL_ORDER if store.get_level(lvl) is not None]
-    if not available_levels:
-        st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
-        st.stop()
-
-    st.session_state.setdefault("geo_level", available_levels[0])
-    geo_level = st.selectbox(
-        "Geography Level",
-        options=available_levels,
-        format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
-        key="geo_level",
-    )
-
-    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
-    ref_choice = st.selectbox("Total Wealth", options=["-- Select --", *ref_options.keys()])
-    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
-    st.caption("Supports K, M, B, T (e.g. 500B = $500 billion)")
-
-    custom_parsed = parse_value(custom_raw)
-    target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
+    st.markdown("##### ⚙️ More options")
 
     overlay_mode = st.radio(
         "Map overlay",
@@ -186,24 +172,9 @@ with st.sidebar:
     with st.expander("About this tool"):
         st.markdown(store.educational_content or "_No educational content found._")
 
-# ------------------------------------------------------------------ main: header + result --
+# ------------------------------------------------------------------ main: header + map --
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
-
-result = st.session_state.result
-if result is not None and result.num_selected > 0:
-    geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Homes at local median", f"{fmt_num(result.median_houses_to_target)}")
-    r2.metric(geo_label, fmt_num(result.num_selected))
-    r3.metric(
-        "Homes at national median",
-        fmt_num(st.session_state.result_national_houses),
-        help=f"National median home price: {fmt_dollar(st.session_state.result_national_median)}",
-    )
-st.caption(st.session_state.status)
-
-# ------------------------------------------------------------------ main: map --
 
 geo_data = store.get_level(st.session_state.geo_level)
 
@@ -246,11 +217,34 @@ if st.session_state.geo_level == "tract":
 
 map_data = st_folium(
     fmap,
-    height=520,
+    height=480,
     use_container_width=True,
     returned_objects=watched,
     key="plutometer_map",
 )
+
+# ----------------------------------------------------------- main: controls + result --
+# Placed below the map (not above, not in the sidebar) so the map is the
+# first thing seen on a vertical/mobile screen, and picking a level/amount +
+# reading the result never requires opening the sidebar.
+
+c1, c2 = st.columns(2)
+with c1:
+    geo_level = st.selectbox(
+        "Geography Level",
+        options=available_levels,
+        format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
+        key="geo_level",
+    )
+with c2:
+    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
+    ref_choice = st.selectbox("Total Wealth", options=["-- Select --", *ref_options.keys()])
+
+custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
+st.caption("Supports K, M, B, T (e.g. 500B = $500 billion)")
+
+custom_parsed = parse_value(custom_raw)
+target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
 
 if map_data:
     if map_data.get("zoom") is not None:
@@ -265,9 +259,22 @@ if map_data:
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
             if not target_value:
-                st.session_state.status = "Select or enter a total wealth amount in Settings."
+                st.session_state.status = "Select or enter a total wealth amount above."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
                 _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
                 st.rerun()
+
+result = st.session_state.result
+if result is not None and result.num_selected > 0:
+    geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Homes at local median", f"{fmt_num(result.median_houses_to_target)}")
+    r2.metric(geo_label, fmt_num(result.num_selected))
+    r3.metric(
+        "Homes at national median",
+        fmt_num(st.session_state.result_national_houses),
+        help=f"National median home price: {fmt_dollar(st.session_state.result_national_median)}",
+    )
+st.caption(st.session_state.status)
