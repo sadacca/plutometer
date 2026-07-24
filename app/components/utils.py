@@ -61,6 +61,14 @@ def fmt_num(value: float) -> str:
     return f"{round(value):,}"
 
 
+def fmt_houses(value: float) -> str:
+    """House count, e.g. 12,345. Below one, keeps two decimals (e.g. '0.17') instead
+    of rounding a real fractional-home amount down to a meaningless '0'."""
+    if value >= 1:
+        return fmt_num(value)
+    return f"{value:.2f}"
+
+
 def price_color(value: float, vmin: float, vmax: float) -> str:
     """Blue (high) -> yellow (low) gradient, matching the original Leaflet overlay."""
     if vmax == vmin:

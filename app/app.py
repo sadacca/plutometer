@@ -29,6 +29,7 @@ from components.utils import (
     TRACT_MIN_ZOOM,
     fmt_dollar,
     fmt_full,
+    fmt_houses,
     fmt_num,
     geo_label,
     parse_value,
@@ -211,8 +212,22 @@ if result is not None and result.num_selected > 0:
     label = geo_label(st.session_state.result_level, result.num_selected)
     st.markdown(f"#### {fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}")
     st.caption(
-        f"≈ **{fmt_num(result.median_houses_to_target)}** homes at local median price"
-        f" · **{fmt_num(st.session_state.result_national_houses)}** at national median"
+        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+        f" ({fmt_dollar(st.session_state.result_national_median)})"
+    )
+elif result is not None and result.area_median_home_value > 0:
+    # Target undercuts even the single smallest geography at the finest level
+    # reached (num_selected == 0) -- expand_contiguous still returns that
+    # geography's own median home value in this case (see its start_val >
+    # target_value short-circuit), so "how many houses could this buy" still
+    # has a real, if fractional, answer instead of a dead-end message.
+    label = geo_label(st.session_state.result_level, 1)
+    st.markdown(f"#### Smaller than a single {label} here")
+    st.caption(
+        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+        f" ({fmt_dollar(result.area_median_home_value)})"
+        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
         f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
 else:
