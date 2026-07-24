@@ -24,13 +24,13 @@ from algorithm import expand_contiguous, find_nearest_geoid
 from data_loader import load_store
 from components.map_view import DEFAULT_ZOOM, build_map
 from components.utils import (
-    GEO_LABELS,
     LEVEL_LABELS,
     LEVEL_ORDER,
     TRACT_MIN_ZOOM,
     fmt_dollar,
     fmt_full,
     fmt_num,
+    geo_label,
     parse_value,
 )
 
@@ -115,7 +115,7 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     st.session_state.result_national_houses = national_houses
     st.session_state.marker = (lat, lon)
     st.session_state.status = (
-        f"{fmt_num(result.num_selected)} {GEO_LABELS.get(level, level).lower()} = {fmt_dollar(result.total_value)}"
+        f"{fmt_num(result.num_selected)} {geo_label(level, result.num_selected)} = {fmt_dollar(result.total_value)}"
         if result.num_selected > 0
         else "No geographies fit -- try a larger amount or zoom in."
     )
@@ -199,20 +199,21 @@ with st.sidebar:
 
 # ------------------------------------------------------------------ main: header + map --
 # Informative text (title + result) stays compact above the map; interactive
-# controls live below it. Together they're kept to a couple of single lines
-# each so the map -- not text -- dominates the vertical space, especially on
-# a phone-height screen.
+# controls live below it. The result, when present, is the actual payoff of
+# the tool, so it gets two lines -- a bold headline equation sized above the
+# app title, then a caption with the "how many houses" context below it --
+# rather than one dense run-on line that buries the numbers.
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
 result = st.session_state.result
 if result is not None and result.num_selected > 0:
-    geo_label = GEO_LABELS.get(st.session_state.result_level, "geographies")
-    st.markdown(
-        f"**{fmt_num(result.num_selected)} {geo_label.lower()}** = {fmt_dollar(result.total_value)} "
-        f"&nbsp;·&nbsp; **{fmt_num(result.median_houses_to_target)}** homes at local median price "
-        f"&nbsp;·&nbsp; **{fmt_num(st.session_state.result_national_houses)}** at national median "
-        f"({fmt_dollar(st.session_state.result_national_median)})"
+    label = geo_label(st.session_state.result_level, result.num_selected)
+    st.markdown(f"#### {fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}")
+    st.caption(
+        f"≈ **{fmt_num(result.median_houses_to_target)}** homes at local median price"
+        f" · **{fmt_num(st.session_state.result_national_houses)}** at national median"
+        f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
 else:
     st.caption(st.session_state.status)
