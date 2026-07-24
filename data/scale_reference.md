@@ -6,10 +6,13 @@ each order of magnitude, how much *residential real estate* does that
 amount of money represent, expressed as a scale of geography instead of a
 raw house count or a fraction with six zeroes in it.
 
+**This whole page is order-of-magnitude, not precision** — see Assumptions
+below for exactly where the soft spots are.
+
 ## The method
 
 Home prices vary a lot by market, so each amount below is given as a
-**range**, bounded by the national 25th and 75th percentile home value
+**range**, bounded by the national 25th and 75th percentile home value¹
 (household-weighted across all ~83,500 U.S. Census tracts, ACS 2017–2021 —
 the same data the map itself uses):
 
@@ -22,11 +25,8 @@ that's closer to 3, in the cheapest quarter closer to 7.
 
 Above the scale of a handful of houses, house counts stop being legible,
 so larger amounts are expressed in geography-sized units instead — a
-**block** (~10-20 homes), a **neighborhood** (~1,000 households), and a
-**metro area** (~75,000 households: a modest, median-sized U.S. metro —
-there are roughly 390 nationally, and the distribution is heavily skewed
-by a few giants, so most are far smaller than the big names that come to
-mind; treat this as an order-of-magnitude anchor, not a specific city).
+**block** (~10-20 homes)², a **neighborhood** (~1,000 households)², and a
+**metro area** (~75,000 households)³.
 
 ## The scale
 
@@ -45,3 +45,21 @@ Notice the pattern repeats at every scale: \$100K is a fraction of a home,
 and \$100M — a thousand times more — is that same fraction of a
 *neighborhood*. The map above lets you see exactly which neighborhood, for
 any amount you pick.
+
+## Assumptions & limits
+
+1. **Percentile bounds are ACS estimates, not appraisals.** The \$148,000 /
+   \$372,000 figures come from this app's own tract-level data — Census
+   *American Community Survey* 5-year estimates, which carry margins of
+   error (especially at the tract level) and lag current market prices.
+   Real local prices can fall well outside this 25th-75th range.
+2. **"Block" and "neighborhood" are informal, round-number conventions**
+   picked for this tool, not official Census geography. A real block or
+   neighborhood varies enormously in size by city and density.
+3. **The "~75,000 households per metro area" figure is a rough,
+   unverified estimate**, not a sourced Census statistic — this
+   environment couldn't reach live Census metro-population data to pin
+   down an actual median. There are roughly 390 U.S. metro areas and the
+   size distribution is heavily skewed by a few giants (metro New York is
+   ~100x the size of a small one), so treat this as an anchor for scale,
+   not a precise number.

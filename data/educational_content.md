@@ -12,6 +12,23 @@ This tool answers that question by mapping wealth onto real neighborhoods. Pick 
 2. Choose a **total wealth** amount — or type your own
 3. **Click the map** — the highlighted area shows whose homes you could buy
 
-## The Data
+## The Data & Its Limits
 
-Housing values come from the U.S. Census (ACS 2017-2021). Wealth percentiles come from the Federal Reserve's Survey of Consumer Finances (2022). This is an educational approximation, not an appraisal.
+Housing values and housing-unit counts come from the U.S. Census's American
+Community Survey 5-year estimates (ACS 2017-2021), at the tract, county, and
+state level. Wealth figures come from the Federal Reserve's Survey of
+Consumer Finances (2022) and public reporting on individual net worths,
+market caps, and government budgets.
+
+Two things worth knowing before you read too much into any single number:
+
+- **ACS figures are statistical estimates, not a census of every house.**
+  They carry margins of error, especially at the tract level where sample
+  sizes are small.
+- **"Total value" here is housing units × median home value** — a rough
+  proxy for an area's residential real estate, not an appraisal of every
+  individual property.
+
+Treat everything this tool shows as an **illustrative, order-of-magnitude
+comparison** — a way to build intuition for scale, not a precise
+dollar-for-dollar accounting.
