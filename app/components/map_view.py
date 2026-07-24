@@ -35,7 +35,20 @@ def build_map(
         _add_legend(m, overlay_mode)
 
     if marker_latlon is not None:
-        folium.Marker(location=list(marker_latlon)).add_to(m)
+        # A plain folium.Marker() uses Leaflet's default raster pin icon,
+        # whose image path often doesn't resolve inside the sandboxed iframe
+        # streamlit-folium renders into -- it shows up as a broken-image
+        # glyph instead of a pin. CircleMarker is pure SVG, no external image
+        # asset at all, so it can't fail to load.
+        folium.CircleMarker(
+            location=list(marker_latlon),
+            radius=7,
+            color="#1A1A1A",
+            weight=2,
+            fill=True,
+            fill_color="#FFFFFF",
+            fill_opacity=1.0,
+        ).add_to(m)
 
     return m
 
