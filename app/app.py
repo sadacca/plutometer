@@ -16,7 +16,7 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous, find_nearest_geoid
 from data_loader import load_store
-from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
+from components.map_view import DEFAULT_ZOOM, build_map
 from components.utils import (
     GEO_LABELS,
     LEVEL_LABELS,
@@ -39,7 +39,6 @@ store = load_store()
 
 _STATE_DEFAULTS = {
     "marker": None,
-    "map_center": DEFAULT_CENTER,
     "map_zoom": DEFAULT_ZOOM,
     "map_bbox": None,
     "last_clicked_processed": None,
@@ -186,24 +185,35 @@ fmap = build_map(
     overlay_mode=overlay_mode,
     selected_geoids=selected_geoids,
     marker_latlon=st.session_state.marker,
-    center=st.session_state.map_center,
     zoom=st.session_state.map_zoom,
 )
+
+# Only watch what the current level actually needs. Streamlit reruns the
+# whole script whenever a watched value changes, so requesting "bounds" (or
+# worse, "center" -- see below) unconditionally meant every pan at
+# state/county level triggered a full rerun for data that isn't even used at
+# those levels, since they always render the full dataset regardless of
+# viewport. "center" is deliberately never watched or fed back into the map's
+# location: lat/lon floats rarely round-trip bit-identical through Leaflet's
+# projection math, so echoing "the same" position back in can register as a
+# real move, fire another moveend, and cascade into repeated reruns per
+# click/pan. zoom is safe to always track (integer, no jitter) and is needed
+# for the tract auto-zoom banner regardless of the current level.
+watched = ["last_clicked", "zoom"]
+if st.session_state.geo_level == "tract":
+    watched.append("bounds")
 
 map_data = st_folium(
     fmap,
     height=700,
     use_container_width=True,
-    returned_objects=["last_clicked", "zoom", "bounds", "center"],
+    returned_objects=watched,
     key="plutometer_map",
 )
 
 if map_data:
     if map_data.get("zoom") is not None:
         st.session_state.map_zoom = map_data["zoom"]
-    center = map_data.get("center")
-    if center:
-        st.session_state.map_center = (center["lat"], center["lng"])
     bbox = _parse_bounds(map_data)
     if bbox is not None:
         st.session_state.map_bbox = bbox
