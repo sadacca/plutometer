@@ -213,8 +213,11 @@ with st.sidebar:
             st.write(f"Median home value: {fmt_full(result.area_median_home_value)}")
             st.write(f"Total housing units: {fmt_num(result.area_total_housing_units)}")
 
-    with st.expander("About this tool"):
+    about_tab, scale_tab = st.tabs(["About this tool", "What does a dollar buy?"])
+    with about_tab:
         st.markdown(store.educational_content or "_No educational content found._")
+    with scale_tab:
+        st.markdown(store.scale_reference_content or "_No content found._")
 
 # ------------------------------------------------------------------ main: header + map --
 # Informative text (title + result) stays compact above the map; interactive
