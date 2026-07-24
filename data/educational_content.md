@@ -24,7 +24,11 @@ Two things worth knowing before you read too much into any single number:
 
 - **ACS figures are statistical estimates, not a census of every house.**
   They carry margins of error, especially at the tract level where sample
-  sizes are small.
+  sizes are small. They're also a few years stale: this data reflects
+  ~2019 price levels, and national home prices have risen roughly 40-60%
+  since then (Zillow puts the current national market at $55.1 trillion,
+  versus ~$41.5 trillion implied by this data) — so on today's market, a
+  given dollar amount buys somewhat less than the map shows.
 - **"Total value" here is housing units × median home value** — a rough
   proxy for an area's residential real estate, not an appraisal of every
   individual property.
