@@ -48,11 +48,23 @@ any amount you pick.
 
 ## Assumptions & limits
 
-1. **Percentile bounds are ACS estimates, not appraisals.** The \$148,000 /
+1. **Percentile bounds are ACS estimates, not appraisals — and they lag
+   current prices by more than a rounding error.** The \$148,000 /
    \$372,000 figures come from this app's own tract-level data — Census
    *American Community Survey* 5-year estimates, which carry margins of
-   error (especially at the tract level) and lag current market prices.
-   Real local prices can fall well outside this 25th-75th range.
+   error (especially at the tract level) and are pegged to the 2017-2021
+   survey window (effectively ~2019 price levels). Zillow's national
+   typical home value (ZHVI) is running **~\$368,000-\$370,000 as of
+   2026** — right around where this app's *75th-percentile, priciest-market*
+   bound sits, not its median. National residential real estate's total
+   value has followed the same path: Zillow put it at a record \$55.1
+   trillion in September 2025, versus the \$41.5 trillion implied by
+   summing this app's ACS-vintage tract data. In other words, prices
+   nationally have risen roughly 40-60% since this data's vintage, so
+   every home-count figure above is probably **overstated by a similar
+   margin relative to today's market** — "\$1M buys 3 to 7 homes" is
+   closer to "2 to 5 homes" at 2026 prices. Real local prices can also
+   fall well outside this 25th-75th range regardless of vintage.
 2. **"Block" and "neighborhood" are informal, round-number conventions**
    picked for this tool, not official Census geography. A real block or
    neighborhood varies enormously in size by city and density.
