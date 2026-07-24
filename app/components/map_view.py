@@ -45,22 +45,51 @@ def build_map(
         _add_legend(m, overlay_mode, has_selection=bool(selected_geoids))
 
     if marker_latlon is not None:
-        # A plain folium.Marker() uses Leaflet's default raster pin icon,
-        # whose image path often doesn't resolve inside the sandboxed iframe
-        # streamlit-folium renders into -- it shows up as a broken-image
-        # glyph instead of a pin. CircleMarker is pure SVG, no external image
-        # asset at all, so it can't fail to load.
-        folium.CircleMarker(
-            location=list(marker_latlon),
-            radius=7,
-            color="#1A1A1A",
-            weight=2,
-            fill=True,
-            fill_color="#FFFFFF",
-            fill_opacity=1.0,
-        ).add_to(m)
+        _add_marker(m, marker_latlon)
 
     return m
+
+
+_MARKER_PULSE_CSS = """
+<style>
+.pm-marker-pulse {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(26, 26, 26, 0.30);
+  animation: pm-marker-pulse 1.6s ease-out infinite;
+}
+@keyframes pm-marker-pulse {
+  0%   { transform: scale(0.35); opacity: 0.9; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+</style>
+"""
+
+
+def _add_marker(m: folium.Map, marker_latlon: tuple[float, float]) -> None:
+    # A pulsing halo (DivIcon, pure CSS) under the precise marker draws the
+    # eye to "you clicked here" -- neutral dark tone rather than the orange
+    # highlight color so it stays visible whether it's sitting on the price
+    # gradient or on top of an orange selection fill.
+    m.get_root().html.add_child(folium.Element(_MARKER_PULSE_CSS))
+    folium.Marker(
+        location=list(marker_latlon),
+        icon=folium.DivIcon(html='<div class="pm-marker-pulse"></div>', icon_size=(26, 26), icon_anchor=(13, 13)),
+    ).add_to(m)
+
+    # A plain folium.Marker() uses Leaflet's default raster pin icon, whose
+    # image path often doesn't resolve inside the sandboxed iframe
+    # streamlit-folium renders into -- it shows up as a broken-image glyph
+    # instead of a pin. CircleMarker is pure SVG, no external image asset at
+    # all, so it can't fail to load.
+    folium.CircleMarker(
+        location=list(marker_latlon),
+        radius=7,
+        color="#1A1A1A",
+        weight=2,
+        fill=True,
+        fill_color="#FFFFFF",
+        fill_opacity=1.0,
+    ).add_to(m)
 
 
 _RENDER_COLS = ["GEOID", "NAME", "total_value", "median_home_value", "median_income", "geometry"]
@@ -131,11 +160,14 @@ def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
     entirely if there's nothing to explain (no fill and no selection), rather than always
     reserving map space for an empty box.
     """
+    # Both sections share the same label weight (600) and the same 120px bar/row
+    # width so the two keys read as one consistent system instead of two
+    # differently-styled fragments bolted together.
     sections: list[str] = []
     if overlay_mode != "none":
         label = _OVERLAY_LABEL[overlay_mode]
         sections.append(f"""
-          <div style="font-weight:600;margin-bottom:2px;">{label}</div>
+          <div style="font-weight:600;margin-bottom:3px;">{label}</div>
           <div style="width:120px;height:12px;border-radius:2px;margin:4px 0;
                       background:linear-gradient(to right, rgb(255,240,30), rgb(25,118,210));"></div>
           <div style="display:flex;justify-content:space-between;color:#666;width:120px;">
@@ -143,10 +175,10 @@ def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
           </div>
         """)
     if has_selection:
-        margin_top = "6px" if sections else "0"
+        divider = "border-top:1px solid #eee;padding-top:8px;margin-top:8px;" if sections else ""
         sections.append(f"""
-          <div style="display:flex;align-items:center;gap:6px;margin-top:{margin_top};">
-            <span style="width:12px;height:12px;border-radius:2px;display:inline-block;
+          <div style="display:flex;align-items:center;gap:6px;font-weight:600;width:120px;{divider}">
+            <span style="width:12px;height:12px;border-radius:2px;display:inline-block;flex-shrink:0;
                         background:{HIGHLIGHT_FILL};border:1.5px solid {HIGHLIGHT_BORDER};"></span>
             <span>Your selection</span>
           </div>
@@ -155,8 +187,8 @@ def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
         return
     html = f"""
     <div style="position: fixed; bottom: 20px; left: 20px; z-index: 9999;
-                background: white; border-radius: 6px; padding: 8px 10px;
-                box-shadow: 0 1px 5px rgba(0,0,0,0.25); font-size: 11px; line-height: 1.4;">
+                background: white; border-radius: 8px; padding: 10px 12px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.18); font-size: 11px; line-height: 1.4;">
       {''.join(sections)}
     </div>
     """

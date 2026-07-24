@@ -42,6 +42,64 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Translucent accent tints (not solid colors) so these read correctly against
+# both Streamlit's light and dark palettes -- see the comment in
+# .streamlit/config.toml on why backgroundColor/textColor are left unset.
+# Text color is never set explicitly; it inherits Streamlit's own themed
+# color. The map iframe is targeted by its component title attribute
+# (stable across reruns -- streamlit-folium always names it this) rather
+# than a generated class, since Streamlit doesn't expose a way to attach a
+# custom class to a component's own wrapper.
+st.markdown(
+    """
+    <style>
+    @keyframes pm-fade-in {
+      0%   { opacity: 0; transform: translateY(4px) scale(0.98); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .pm-stat-card {
+      background: rgba(245, 124, 0, 0.08);
+      border: 1px solid rgba(245, 124, 0, 0.35);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 4px 0 10px 0;
+      animation: pm-fade-in 0.35s ease-out;
+    }
+    .pm-stat-headline {
+      font-size: 1.4rem;
+      font-weight: 700;
+      line-height: 1.3;
+      margin: 0 0 4px 0;
+    }
+    .pm-stat-caption {
+      font-size: 0.85rem;
+      opacity: 0.75;
+      line-height: 1.4;
+    }
+    .pm-empty-banner {
+      background: rgba(245, 124, 0, 0.05);
+      border: 1.5px dashed rgba(245, 124, 0, 0.4);
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin: 4px 0 10px 0;
+      font-size: 0.92rem;
+      opacity: 0.85;
+    }
+    iframe[title="streamlit_folium.st_folium"] {
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 14px rgba(0, 0, 0, 0.14);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      /* streamlit-folium sets the iframe's real height itself once its JS
+         finishes mounting -- this floor just stops the bordered/shadowed
+         frame rendering as a broken sliver during that brief window. */
+      min-height: 200px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 store = load_store()
 
 _STATE_DEFAULTS = {
@@ -70,6 +128,16 @@ if not available_levels:
     st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
     st.stop()
 st.session_state.setdefault("geo_level", available_levels[0])
+
+
+def _stat_card_html(headline: str, caption: str) -> str:
+    """The primary result, styled as a standalone card (see the injected .pm-stat-card
+    CSS above) instead of a plain markdown header -- the actual payoff of the tool
+    deserves more visual weight than the surrounding text. caption may contain simple
+    <strong> tags; both args are always built from this module's own formatted numbers/
+    labels, never raw user input, so interpolating them directly is safe here.
+    """
+    return f'<div class="pm-stat-card"><div class="pm-stat-headline">{headline}</div><div class="pm-stat-caption">{caption}</div></div>'
 
 
 def _run_computation(lat: float, lon: float, target_value: float, level: str, depth: int = 0) -> None:
@@ -240,12 +308,13 @@ st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 result = st.session_state.result
 if result is not None and result.num_selected > 0:
     label = geo_label(st.session_state.result_level, result.num_selected)
-    st.markdown(f"#### {fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}")
-    st.caption(
-        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
-        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+    headline = f"{fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}"
+    caption = (
+        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
+        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
         f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
+    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
 elif result is not None and result.area_median_home_value > 0:
     # Target undercuts even the single smallest geography at the finest level
     # reached (num_selected == 0) -- expand_contiguous still returns that
@@ -253,15 +322,16 @@ elif result is not None and result.area_median_home_value > 0:
     # target_value short-circuit), so "how many houses could this buy" still
     # has a real, if fractional, answer instead of a dead-end message.
     label = geo_label(st.session_state.result_level, 1)
-    st.markdown(f"#### Smaller than a single {label} here")
-    st.caption(
-        f"≈ **{fmt_houses(result.median_houses_to_target)}** homes at local median price"
+    headline = f"Smaller than a single {label} here"
+    caption = (
+        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
         f" ({fmt_dollar(result.area_median_home_value)})"
-        f" · **{fmt_houses(st.session_state.result_national_houses)}** at national median"
+        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
         f" ({fmt_dollar(st.session_state.result_national_median)})"
     )
+    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
 else:
-    st.caption(st.session_state.status)
+    st.markdown(f'<div class="pm-empty-banner">{st.session_state.status}</div>', unsafe_allow_html=True)
 
 if st.session_state.marker is not None:
     # A one-line "where am I" anchor -- most useful at tract zoom, where the
@@ -426,5 +496,6 @@ if map_data:
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
-                _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
+                with st.spinner("Finding the largest area that fits..."):
+                    _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
                 st.rerun()
