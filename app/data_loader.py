@@ -27,6 +27,11 @@ from shapely.geometry import box
 DATA_DIR = Path(__file__).parent.parent / "data"
 CACHE_DIR = DATA_DIR / "cache"
 
+# NAD83 / Conus Albers Equal Area -- centroids are computed in this projected
+# CRS (not directly on unprojected lon/lat geometry, which distorts centroids
+# for large or non-convex shapes like states) and converted back to EPSG:4326.
+_CENTROID_CRS = 5070
+
 
 class GeographyData:
     """Values/enrichment/centroids/adjacency/names for one geography level, plus geometry access."""
@@ -67,7 +72,7 @@ class GeographyData:
                 for _, row in attrs_df.iterrows()
             }
         elif full_gdf is not None:
-            c = full_gdf.geometry.centroid
+            c = full_gdf.geometry.to_crs(_CENTROID_CRS).centroid.set_crs(_CENTROID_CRS).to_crs(4326)
             self.centroids = {geoid: (pt.x, pt.y) for geoid, pt in zip(full_gdf["GEOID"], c)}
         else:
             self.centroids = {}

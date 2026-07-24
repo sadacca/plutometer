@@ -69,6 +69,17 @@ CONTINENTAL_FIPS = {
 TRACT_SIMPLIFY_TOLERANCES = [0.005, 0.01, 0.02, 0.04]
 TRACT_FGB_MAX_MB = 80
 
+# NAD83 / Conus Albers Equal Area -- centroids are computed in this projected
+# CRS (not directly on unprojected lon/lat geometry, which distorts centroids
+# for large or non-convex shapes) and converted back to EPSG:4326 for storage.
+CENTROID_CRS = 5070
+
+
+def accurate_centroids(geometry: gpd.GeoSeries) -> gpd.GeoSeries:
+    """Centroids computed in a projected CRS, returned as points in EPSG:4326."""
+    projected = geometry.to_crs(CENTROID_CRS).centroid
+    return projected.set_crs(CENTROID_CRS).to_crs(4326)
+
 
 def download_file(url: str, dest: Path, description: str) -> Path:
     """Download a file if it doesn't already exist."""
@@ -291,7 +302,7 @@ def stage_tract() -> None:
     merged = _merge_pdb(tract_gdf, pdb_tract)
 
     # Centroids computed from the un-simplified geometry, before it's split off.
-    centroids = merged.geometry.centroid
+    centroids = accurate_centroids(merged.geometry)
     merged["centroid_lon"] = centroids.x
     merged["centroid_lat"] = centroids.y
 
