@@ -6,10 +6,10 @@ the largest contiguous set of geographies (states / counties / neighborhoods)
 whose combined residential real-estate value doesn't exceed it.
 
 Mobile-first layout: the sidebar is collapsed by default and holds only
-settings (geography level, target value, overlay, and secondary detail
-expanders). The header, the primary "how many houses" result, and the map
-itself all live in the main column so the core click-to-see-result loop
-never requires opening the sidebar.
+secondary settings (overlay mode, clear button, detail expanders). The
+header, the map, the core controls (geography level, target value), and the
+primary "how many houses" result all live in the main column, map first, so
+the whole click-to-see-result loop never requires opening the sidebar.
 """
 
 import sys
@@ -46,7 +46,6 @@ store = load_store()
 _STATE_DEFAULTS = {
     "marker": None,
     "map_zoom": DEFAULT_ZOOM,
-    "map_bbox": None,
     "last_clicked_processed": None,
     "result": None,
     "result_level": None,
@@ -63,6 +62,12 @@ for _k, _v in _STATE_DEFAULTS.items():
 _pending_level = st.session_state.pop("pending_geo_level", None)
 if _pending_level is not None:
     st.session_state["geo_level"] = _pending_level
+
+available_levels = [lvl for lvl in LEVEL_ORDER if store.get_level(lvl) is not None]
+if not available_levels:
+    st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
+    st.stop()
+st.session_state.setdefault("geo_level", available_levels[0])
 
 
 def _run_computation(lat: float, lon: float, target_value: float, level: str, depth: int = 0) -> None:
@@ -116,45 +121,40 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     )
 
 
-def _parse_bounds(map_data: dict) -> tuple[float, float, float, float] | None:
-    bounds = map_data.get("bounds")
-    if not bounds:
+def _tract_render_bbox(geo_data, geoids, marker, pad: float = 0.08) -> tuple[float, float, float, float] | None:
+    """Bounding box covering the given geoids' centroids (padded for context),
+    or a small box around the marker if there's no selection yet. Deliberately
+    *not* derived from the map's live pan/zoom bounds -- watching those as an
+    st_folium returned_object caused an endless rerun loop: each rerun rebuilds
+    the folium.Map from scratch, and re-mounting it can report slightly
+    different bounds than before (container-size timing, projection rounding),
+    which registers as a real pan and triggers another rerun, which remounts
+    again... a cascade that never settles. A bbox computed from data we already
+    trust (selection centroids, or the click point) has no such feedback path.
+    """
+    lons: list[float] = []
+    lats: list[float] = []
+    for g in geoids or []:
+        c = geo_data.centroids.get(g)
+        if c:
+            lons.append(c[0])
+            lats.append(c[1])
+    if not lons and marker:
+        lat, lon = marker
+        lons, lats = [lon], [lat]
+    if not lons:
         return None
-    try:
-        sw, ne = bounds["_southWest"], bounds["_northEast"]
-        return (sw["lng"], sw["lat"], ne["lng"], ne["lat"])
-    except (KeyError, TypeError):
-        return None
+    return (min(lons) - pad, min(lats) - pad, max(lons) + pad, max(lats) + pad)
 
 
-# ---------------------------------------------------------------- sidebar: settings --
-# Collapsed by default (see set_page_config) -- everything the core loop needs
-# (header, result, map) lives in the main column below, so the sidebar is only
-# needed to change settings or dig into secondary detail.
+# ---------------------------------------------------------------- sidebar: secondary --
+# Collapsed by default (see set_page_config). The core loop -- header, map,
+# level/amount controls, and the primary result -- all lives in the main
+# column below, so the sidebar is only needed for the overlay toggle or to
+# dig into secondary detail.
 
 with st.sidebar:
-    st.markdown("##### ⚙️ Settings")
-
-    available_levels = [lvl for lvl in LEVEL_ORDER if store.get_level(lvl) is not None]
-    if not available_levels:
-        st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
-        st.stop()
-
-    st.session_state.setdefault("geo_level", available_levels[0])
-    geo_level = st.selectbox(
-        "Geography Level",
-        options=available_levels,
-        format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
-        key="geo_level",
-    )
-
-    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
-    ref_choice = st.selectbox("Total Wealth", options=["-- Select --", *ref_options.keys()])
-    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
-    st.caption("Supports K, M, B, T (e.g. 500B = $500 billion)")
-
-    custom_parsed = parse_value(custom_raw)
-    target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
+    st.markdown("##### ⚙️ More options")
 
     overlay_mode = st.radio(
         "Map overlay",
@@ -186,40 +186,45 @@ with st.sidebar:
     with st.expander("About this tool"):
         st.markdown(store.educational_content or "_No educational content found._")
 
-# ------------------------------------------------------------------ main: header + result --
+# ------------------------------------------------------------------ main: header + map --
+# Informative text (title + result) stays compact above the map; interactive
+# controls live below it. Together they're kept to a couple of single lines
+# each so the map -- not text -- dominates the vertical space, especially on
+# a phone-height screen.
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
 result = st.session_state.result
 if result is not None and result.num_selected > 0:
-    geo_label = GEO_LABELS.get(st.session_state.result_level, "Geographies")
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Homes at local median", f"{fmt_num(result.median_houses_to_target)}")
-    r2.metric(geo_label, fmt_num(result.num_selected))
-    r3.metric(
-        "Homes at national median",
-        fmt_num(st.session_state.result_national_houses),
-        help=f"National median home price: {fmt_dollar(st.session_state.result_national_median)}",
+    geo_label = GEO_LABELS.get(st.session_state.result_level, "geographies")
+    st.markdown(
+        f"**{fmt_num(result.num_selected)} {geo_label.lower()}** = {fmt_dollar(result.total_value)} "
+        f"&nbsp;·&nbsp; **{fmt_num(result.median_houses_to_target)}** homes at local median price "
+        f"&nbsp;·&nbsp; **{fmt_num(st.session_state.result_national_houses)}** at national median "
+        f"({fmt_dollar(st.session_state.result_national_median)})"
     )
-st.caption(st.session_state.status)
-
-# ------------------------------------------------------------------ main: map --
+else:
+    st.caption(st.session_state.status)
 
 geo_data = store.get_level(st.session_state.geo_level)
+
+selected_geoids = None
+if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
+    selected_geoids = set(st.session_state.result.selected_geoids)
 
 render_gdf = None
 if geo_data is not None:
     if st.session_state.geo_level == "tract":
         if st.session_state.map_zoom < TRACT_MIN_ZOOM:
             st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
-        elif st.session_state.map_bbox is not None:
-            render_gdf = geo_data.viewport_gdf(st.session_state.map_bbox)
+        else:
+            tract_bbox = _tract_render_bbox(geo_data, selected_geoids, st.session_state.marker)
+            if tract_bbox is not None:
+                render_gdf = geo_data.viewport_gdf(tract_bbox)
+            else:
+                st.caption("Tap the map to load neighborhood boundaries there.")
     else:
         render_gdf = geo_data.full_gdf
-
-selected_geoids = None
-if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
-    selected_geoids = set(st.session_state.result.selected_geoids)
 
 fmap = build_map(
     render_gdf=render_gdf,
@@ -229,35 +234,53 @@ fmap = build_map(
     zoom=st.session_state.map_zoom,
 )
 
-# Only watch what the current level actually needs. Streamlit reruns the
-# whole script whenever a watched value changes, so requesting "bounds" (or
-# worse, "center" -- see below) unconditionally meant every pan at
-# state/county level triggered a full rerun for data that isn't even used at
-# those levels, since they always render the full dataset regardless of
-# viewport. "center" is deliberately never watched or fed back into the map's
-# location: lat/lon floats rarely round-trip bit-identical through Leaflet's
-# projection math, so echoing "the same" position back in can register as a
-# real move, fire another moveend, and cascade into repeated reruns per
-# click/pan. zoom is safe to always track (integer, no jitter) and is needed
-# for the tract auto-zoom banner regardless of the current level.
-watched = ["last_clicked", "zoom"]
-if st.session_state.geo_level == "tract":
-    watched.append("bounds")
-
+# Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
+# script whenever a watched value changes, and both "center" and "bounds"
+# turned out to be unsafe to watch: rebuilding the folium.Map from scratch
+# every rerun and re-mounting it can report a slightly different position/
+# viewport than before (container-size timing, projection rounding), which
+# registers as a real pan and triggers another rerun -- a cascade that never
+# settles (see _tract_render_bbox for how tract geometry avoids needing
+# "bounds" at all). zoom is a plain integer with no such jitter risk, and is
+# needed for the tract auto-zoom banner regardless of the current level.
 map_data = st_folium(
     fmap,
-    height=520,
+    height=560,
     use_container_width=True,
-    returned_objects=watched,
+    returned_objects=["last_clicked", "zoom"],
     key="plutometer_map",
 )
+
+# ----------------------------------------------------------- main: controls --
+# Interactive controls below the map (not above, not in the sidebar) so the
+# map is the first thing seen on a vertical/mobile screen. One row, three
+# columns -- auto-stacks to full width on narrow viewports -- to keep this
+# section as short as the result line above the map.
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    geo_level = st.selectbox(
+        "Geography Level",
+        options=available_levels,
+        format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
+        key="geo_level",
+    )
+with c2:
+    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
+    ref_labels = ["-- Select --", *ref_options.keys()]
+    # Default to Elon Musk's net worth so there's always a result to look at
+    # on first load, instead of a blank "-- Select --" state.
+    default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
+    ref_choice = st.selectbox("Total Wealth", options=ref_labels, index=ref_labels.index(default_label))
+with c3:
+    custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
+
+custom_parsed = parse_value(custom_raw)
+target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
 
 if map_data:
     if map_data.get("zoom") is not None:
         st.session_state.map_zoom = map_data["zoom"]
-    bbox = _parse_bounds(map_data)
-    if bbox is not None:
-        st.session_state.map_bbox = bbox
 
     clicked = map_data.get("last_clicked")
     if clicked:
@@ -265,7 +288,7 @@ if map_data:
         if click_key != st.session_state.last_clicked_processed:
             st.session_state.last_clicked_processed = click_key
             if not target_value:
-                st.session_state.status = "Select or enter a total wealth amount in Settings."
+                st.session_state.status = "Select or enter a total wealth amount below."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:

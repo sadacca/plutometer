@@ -260,17 +260,30 @@ def stage_boundaries() -> None:
               f"{len(merged)} features, total value ${total_val / 1e12:.2f}T)")
 
 
+def _write_fgb(gdf: gpd.GeoDataFrame, path: Path) -> None:
+    """Write a GeoDataFrame as a single-file FlatGeobuf.
+
+    GDAL's FlatGeobuf driver only writes a single flat file when the given
+    path itself ends in ".fgb" -- any other extension (e.g. a ".tmp" scratch
+    name) makes it treat the path as a *dataset directory* and write a
+    per-layer file inside it instead, silently turning "tract.fgb" into a
+    directory containing "tract.fgb/tract.fgb.fgb". Every intermediate name
+    used here must keep the .fgb suffix to avoid that.
+    """
+    if path.exists():
+        path.unlink()
+    gdf.to_file(path, driver="FlatGeobuf")
+
+
 def _write_tract_fgb(geom_gdf: gpd.GeoDataFrame) -> None:
     """Write geometry-only tract file, simplifying further if it's too large for git."""
     output_path = DATA_DIR / "tract.fgb"
+    tmp_path = DATA_DIR / "tract.trial.fgb"
     for tolerance in TRACT_SIMPLIFY_TOLERANCES:
         g = geom_gdf.copy()
         g["geometry"] = g.geometry.simplify(tolerance, preserve_topology=True)
 
-        tmp_path = DATA_DIR / "tract.fgb.tmp"
-        if tmp_path.exists():
-            tmp_path.unlink()
-        g.to_file(tmp_path, driver="FlatGeobuf")
+        _write_fgb(g, tmp_path)
         size_mb = tmp_path.stat().st_size / 1024 / 1024
         print(f"  tract.fgb: tolerance={tolerance} -> {size_mb:.1f} MB")
 
@@ -286,7 +299,7 @@ def _write_tract_fgb(geom_gdf: gpd.GeoDataFrame) -> None:
           f"max simplification (tolerance={TRACT_SIMPLIFY_TOLERANCES[-1]}); writing anyway.")
     g = geom_gdf.copy()
     g["geometry"] = g.geometry.simplify(TRACT_SIMPLIFY_TOLERANCES[-1], preserve_topology=True)
-    g.to_file(output_path, driver="FlatGeobuf")
+    _write_fgb(g, output_path)
 
 
 def stage_tract() -> None:
