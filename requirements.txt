@@ -1,9 +1,10 @@
-fastapi
-uvicorn[standard]
+streamlit>=1.40.0
+streamlit-folium>=0.24.0
+folium>=0.17.0
 geopandas
+pyogrio
 shapely
 pandas
+numpy
 scipy
 requests
-openpyxl
-libpysal

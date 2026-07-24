@@ -1,0 +1,74 @@
+name: Prepare data (Census boundaries + PDB values + adjacency) - feeds the Streamlit app's data/ directory
+
+# Manual trigger only: Census cartographic boundaries + Planning Database values
+# change on an annual ACS-vintage cadence, not continuously, so there's no
+# schedule here (unlike a daily-refreshed data source). Run this once before
+# the first deploy, and again whenever the Census publishes a new PDB vintage.
+#
+# Each stage commits its own output to data/ as soon as it succeeds, so the
+# Streamlit app (which only ever reads data/, never regenerates it) can pick
+# up a partial run if a later stage fails.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pipeline dependencies
+        run: pip install pandas numpy geopandas shapely requests pyogrio
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Stage 1 -- boundaries (state + county)
+        run: python scripts/prepare_data.py --stage boundaries
+
+      - name: Commit boundaries
+        run: |
+          git add data/state.geojson data/county.geojson
+          if git diff --staged --quiet; then
+            echo "No boundary changes to commit."
+          else
+            git commit -m "pipeline: update state/county boundaries + values"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Stage 2 -- tract
+        run: python scripts/prepare_data.py --stage tract
+
+      - name: Commit tract
+        run: |
+          git add data/tract.fgb data/tract_values.parquet
+          if git diff --staged --quiet; then
+            echo "No tract changes to commit."
+          else
+            git commit -m "pipeline: update tract boundaries + values"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Stage 3 -- adjacency
+        run: python scripts/prepare_data.py --stage adjacency
+
+      - name: Commit adjacency caches
+        run: |
+          git add data/cache/
+          if git diff --staged --quiet; then
+            echo "No adjacency changes to commit."
+          else
+            git commit -m "pipeline: update precomputed adjacency graphs"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
