@@ -1,24 +1,19 @@
-name,value
-Median US Household Net Worth,192900
-90th Percentile Household Net Worth,1920000
-95th Percentile Household Net Worth,3780000
-99th Percentile Household Net Worth,13670000
-99.5th Percentile Household Net Worth,20150000
-99.9th Percentile Household Net Worth,61830000
-US Federal Education Budget,79000000000
-Bill Gates Net Worth,108000000000
-Steve Ballmer Net Worth,126600000000
-Warren Buffett Net Worth,147800000000
-Jensen Huang Net Worth,154000000000
-Larry Ellison Net Worth,190000000000
-Mark Zuckerberg Net Worth,222000000000
-Jeff Bezos Net Worth,254500000000
-Sergey Brin Net Worth,259100000000
-Larry Page Net Worth,280900000000
-Cost of Interstate Highway System (inflation adjusted),620000000000
-US Annual Military Budget,1040000000000
-Elon Musk Net Worth,1053000000000
-Apple Market Cap,4700000000000
-Annual US Healthcare Spending,5700000000000
-US National Debt,39390000000000
-Total US Residential Real Estate Value,55700000000000
+name,value,category
+Median US Household Net Worth,192900,Household Percentiles
+90th Percentile Household Net Worth,1920000,Household Percentiles
+95th Percentile Household Net Worth,3780000,Household Percentiles
+99th Percentile Household Net Worth,13670000,Household Percentiles
+99.5th Percentile Household Net Worth,20150000,Household Percentiles
+99.9th Percentile Household Net Worth,61830000,Household Percentiles
+A $100 Million Fortune (a smaller lesser-known fortune),100000000,Super-Rich Individuals
+A $1 Billion Fortune ('just' a billionaire),1000000000,Super-Rich Individuals
+A Top-Tier Billionaire (~$250B: Gates/Buffett/Bezos/Zuckerberg),254500000000,Super-Rich Individuals
+Elon Musk Net Worth,1053000000000,Super-Rich Individuals
+US Federal Education Budget,79000000000,Government Programs
+Cost of Interstate Highway System (inflation adjusted),620000000000,Government Programs
+US Annual Military Budget,1040000000000,Government Programs
+Apple Market Cap,4700000000000,Megacap Stocks
+Annual US Healthcare Spending,5700000000000,National-Scale Benchmarks
+US National Debt,39390000000000,National-Scale Benchmarks
+Total US Residential Real Estate Value,55700000000000,National-Scale Benchmarks
+Satoshi Nakamoto's Bitcoin Wallet (~1.1M BTC @ ~$65K as of Jul 2026),71532956000,Curiosities

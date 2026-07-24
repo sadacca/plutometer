@@ -332,12 +332,27 @@ with c1:
         key="geo_level",
     )
 with c2:
-    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
-    ref_labels = ["-- Select --", *ref_options.keys()]
+    # Categories preserve reference_values.csv's row order (dict.fromkeys
+    # dedupes while keeping first-seen order) rather than sorting
+    # alphabetically, so related categories stay grouped the way the CSV
+    # author intended (percentiles first, national-scale figures last).
+    categories = list(dict.fromkeys(r["category"] for r in store.reference_values))
+    default_category = "Super-Rich Individuals"
+    category_index = categories.index(default_category) if default_category in categories else 0
+    wealth_category = st.selectbox("Wealth Category", options=categories, index=category_index, key="wealth_category")
+
+    filtered = [r for r in store.reference_values if r["category"] == wealth_category]
+    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in filtered}
+    ref_labels = list(ref_options.keys())
     # Default to Elon Musk's net worth so there's always a result to look at
     # on first load, instead of a blank "-- Select --" state.
     default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
-    ref_choice = st.selectbox("Total Wealth", options=ref_labels, index=ref_labels.index(default_label))
+    # Keying on the category makes this a fresh widget whenever the category
+    # changes, so its selection can't get stuck pointing at an index/value
+    # that belonged to the previous category's option list.
+    ref_choice = st.selectbox(
+        "Amount", options=ref_labels, index=ref_labels.index(default_label), key=f"wealth_amount_{wealth_category}"
+    )
 with c3:
     custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
 
