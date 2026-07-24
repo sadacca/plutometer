@@ -142,9 +142,14 @@ pickled to `data/cache/*.pkl`, committed to git. The deployed app only ever
 *loads* these caches; it never rebuilds an adjacency graph at runtime.
 
 `data/reference_values.csv` (name, dollar value -- household net-worth
-percentiles, billionaire net worths, national debt, etc.) and
-`data/educational_content.md` (the sidebar's "About this tool" text) are
-hand-maintained, not pipeline-generated.
+percentiles, billionaire net worths, national debt, etc.), sorted ascending
+by value, and `data/educational_content.md` (the sidebar's "About this
+tool" text) are hand-maintained, not pipeline-generated. Household
+percentiles are Fed SCF 2022 (still the latest published survey; 2025 SCF
+results aren't out until late 2026). Billionaire net worths, market caps,
+and budget/debt figures were last refreshed July 2026 -- re-check these
+periodically, they move fast (Elon Musk alone moved from ~$750B to ~$1.05T
+within the same month after SpaceX's June 2026 IPO).
 
 ---
 

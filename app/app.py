@@ -46,7 +46,6 @@ store = load_store()
 _STATE_DEFAULTS = {
     "marker": None,
     "map_zoom": DEFAULT_ZOOM,
-    "map_bbox": None,
     "last_clicked_processed": None,
     "result": None,
     "result_level": None,
@@ -122,15 +121,30 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     )
 
 
-def _parse_bounds(map_data: dict) -> tuple[float, float, float, float] | None:
-    bounds = map_data.get("bounds")
-    if not bounds:
+def _tract_render_bbox(geo_data, geoids, marker, pad: float = 0.08) -> tuple[float, float, float, float] | None:
+    """Bounding box covering the given geoids' centroids (padded for context),
+    or a small box around the marker if there's no selection yet. Deliberately
+    *not* derived from the map's live pan/zoom bounds -- watching those as an
+    st_folium returned_object caused an endless rerun loop: each rerun rebuilds
+    the folium.Map from scratch, and re-mounting it can report slightly
+    different bounds than before (container-size timing, projection rounding),
+    which registers as a real pan and triggers another rerun, which remounts
+    again... a cascade that never settles. A bbox computed from data we already
+    trust (selection centroids, or the click point) has no such feedback path.
+    """
+    lons: list[float] = []
+    lats: list[float] = []
+    for g in geoids or []:
+        c = geo_data.centroids.get(g)
+        if c:
+            lons.append(c[0])
+            lats.append(c[1])
+    if not lons and marker:
+        lat, lon = marker
+        lons, lats = [lon], [lat]
+    if not lons:
         return None
-    try:
-        sw, ne = bounds["_southWest"], bounds["_northEast"]
-        return (sw["lng"], sw["lat"], ne["lng"], ne["lat"])
-    except (KeyError, TypeError):
-        return None
+    return (min(lons) - pad, min(lats) - pad, max(lons) + pad, max(lats) + pad)
 
 
 # ---------------------------------------------------------------- sidebar: secondary --
@@ -194,19 +208,23 @@ else:
 
 geo_data = store.get_level(st.session_state.geo_level)
 
+selected_geoids = None
+if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
+    selected_geoids = set(st.session_state.result.selected_geoids)
+
 render_gdf = None
 if geo_data is not None:
     if st.session_state.geo_level == "tract":
         if st.session_state.map_zoom < TRACT_MIN_ZOOM:
             st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
-        elif st.session_state.map_bbox is not None:
-            render_gdf = geo_data.viewport_gdf(st.session_state.map_bbox)
+        else:
+            tract_bbox = _tract_render_bbox(geo_data, selected_geoids, st.session_state.marker)
+            if tract_bbox is not None:
+                render_gdf = geo_data.viewport_gdf(tract_bbox)
+            else:
+                st.caption("Tap the map to load neighborhood boundaries there.")
     else:
         render_gdf = geo_data.full_gdf
-
-selected_geoids = None
-if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
-    selected_geoids = set(st.session_state.result.selected_geoids)
 
 fmap = build_map(
     render_gdf=render_gdf,
@@ -216,26 +234,20 @@ fmap = build_map(
     zoom=st.session_state.map_zoom,
 )
 
-# Only watch what the current level actually needs. Streamlit reruns the
-# whole script whenever a watched value changes, so requesting "bounds" (or
-# worse, "center" -- see below) unconditionally meant every pan at
-# state/county level triggered a full rerun for data that isn't even used at
-# those levels, since they always render the full dataset regardless of
-# viewport. "center" is deliberately never watched or fed back into the map's
-# location: lat/lon floats rarely round-trip bit-identical through Leaflet's
-# projection math, so echoing "the same" position back in can register as a
-# real move, fire another moveend, and cascade into repeated reruns per
-# click/pan. zoom is safe to always track (integer, no jitter) and is needed
-# for the tract auto-zoom banner regardless of the current level.
-watched = ["last_clicked", "zoom"]
-if st.session_state.geo_level == "tract":
-    watched.append("bounds")
-
+# Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
+# script whenever a watched value changes, and both "center" and "bounds"
+# turned out to be unsafe to watch: rebuilding the folium.Map from scratch
+# every rerun and re-mounting it can report a slightly different position/
+# viewport than before (container-size timing, projection rounding), which
+# registers as a real pan and triggers another rerun -- a cascade that never
+# settles (see _tract_render_bbox for how tract geometry avoids needing
+# "bounds" at all). zoom is a plain integer with no such jitter risk, and is
+# needed for the tract auto-zoom banner regardless of the current level.
 map_data = st_folium(
     fmap,
     height=560,
     use_container_width=True,
-    returned_objects=watched,
+    returned_objects=["last_clicked", "zoom"],
     key="plutometer_map",
 )
 
@@ -255,7 +267,11 @@ with c1:
     )
 with c2:
     ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in store.reference_values}
-    ref_choice = st.selectbox("Total Wealth", options=["-- Select --", *ref_options.keys()])
+    ref_labels = ["-- Select --", *ref_options.keys()]
+    # Default to Elon Musk's net worth so there's always a result to look at
+    # on first load, instead of a blank "-- Select --" state.
+    default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
+    ref_choice = st.selectbox("Total Wealth", options=ref_labels, index=ref_labels.index(default_label))
 with c3:
     custom_raw = st.text_input("Custom amount", placeholder="e.g. 500B or 1.5T")
 
@@ -265,9 +281,6 @@ target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
 if map_data:
     if map_data.get("zoom") is not None:
         st.session_state.map_zoom = map_data["zoom"]
-    bbox = _parse_bounds(map_data)
-    if bbox is not None:
-        st.session_state.map_bbox = bbox
 
     clicked = map_data.get("last_clicked")
     if clicked:
