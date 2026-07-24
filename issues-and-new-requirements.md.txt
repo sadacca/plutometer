@@ -1,0 +1,17 @@
+## Issues identified: 
+1. data using synthetic values and therefore unrealistic - this software must download and use the actual Census planning database to preload geojson references
+Tips for using the PDB:  
+- for housing value please use Med_house_value_acs_17_21 
+- for total housing units please use tot_housing_units_acs_17_21
+
+2. plotting of tract-level data is extremely slow - identify 3 ways of speedup through shortcuts or approximations (e.g. only allowing tract-level displays with an appropriate level of zoom) and implement
+
+
+## New Requirements: 
+1. allow the input of a custom value as the comparison
+2. ensure the sidebar with navigation information can be collapsible
+3. provide an additional collapsible display as a header, footer, or additional content in sidebar to allow discussion of eductional content
+4. calculate (from downloaded PDB) what the average income is for the area under selection, what the average price of a new home is for that area
+5. add several additional placeholder values including median wealth for a household, wealth for a household in the 90th, 95th, 99th, 99.5th, and 99.9th percentile. 
+6. identify the # of median houses that could add up to the threshold for the area highlighted (and # from the national median if no area was highlighted) 
+7.For states and counties - please use standard state/county names to describe each geography, not the FIPS code. 
