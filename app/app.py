@@ -31,6 +31,7 @@ from components.utils import (
     fmt_full,
     fmt_houses,
     fmt_num,
+    fractional_headline,
     geo_label,
     parse_value,
 )
@@ -341,8 +342,10 @@ elif result is not None and result.area_median_home_value > 0:
     # geography's own median home value in this case (see its start_val >
     # target_value short-circuit), so "how many houses could this buy" still
     # has a real, if fractional, answer instead of a dead-end message.
-    label = geo_label(st.session_state.result_level, 1)
-    headline = f"{target_label} is smaller than a single {label} here"
+    # fractional_headline tiers the wording by actual house count -- a flat
+    # "smaller than a whole neighborhood" reads the same whether the money
+    # buys 3 houses or 300, since a tract can hold hundreds to thousands.
+    headline = fractional_headline(st.session_state.result_level, result.median_houses_to_target)
     caption = (
         f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
         f" ({fmt_dollar(result.area_median_home_value)})"

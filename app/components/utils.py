@@ -7,8 +7,12 @@ _VALUE_RE = re.compile(r"^([0-9]*\.?[0-9]+)\s*([KkMmBbTt]?)$")
 
 GEO_LABELS = {"state": "Whole States", "county": "Whole Counties", "tract": "Whole Neighborhoods"}
 _GEO_LABELS_SINGULAR = {"state": "whole state", "county": "whole county", "tract": "whole neighborhood"}
+_GEO_NOUNS = {"state": "state", "county": "county", "tract": "neighborhood"}
 LEVEL_LABELS = {"state": "State", "county": "County", "tract": "Neighborhood (tract)"}
 LEVEL_ORDER = ["state", "county", "tract"]
+
+# Boundaries for fractional_headline's house-count tiers -- see its docstring.
+FEW_HOUSES_MAX = 50
 
 HIGHLIGHT_FILL = "#F57C00"
 HIGHLIGHT_BORDER = "#E65100"
@@ -21,6 +25,24 @@ def geo_label(level: str, count: float) -> str:
     if round(count) == 1:
         return _GEO_LABELS_SINGULAR.get(level, level)
     return GEO_LABELS.get(level, level).lower()
+
+
+def fractional_headline(level: str, houses: float) -> str:
+    """Headline for when a target undercuts even the single smallest geography at
+    this level (num_selected == 0). "Smaller than a single whole neighborhood"
+    reads as roughly the same non-answer whether the money buys 3 houses or 300 --
+    a neighborhood-scale geography (a Census tract) can hold hundreds to thousands
+    of homes, so this tiers the wording by the actual house count instead:
+    under 1 house, a handful (up to FEW_HOUSES_MAX), or a partial geography above
+    that. The exact fractional count is still shown separately in the caption below
+    this headline -- this just picks the right words for the scale it's at.
+    """
+    noun = _GEO_NOUNS.get(level, level)
+    if houses < 1:
+        return "Part of a house here"
+    if houses <= FEW_HOUSES_MAX:
+        return "A few houses here"
+    return f"Part of a {noun} here"
 
 
 def parse_value(raw: str) -> float | None:
