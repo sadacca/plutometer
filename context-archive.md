@@ -112,3 +112,55 @@ Noted — ~$490B gap from FIPS formatting. Minor impact.
 
 ### 4-10. (carried forward or deferred)
 See current open-questions.md for remaining items.
+
+---
+
+## Iteration 3 (from open-questions.md) -- all now resolved
+
+### 1. Tract Viewport Flickering
+**RESOLVED.** `data_loader._round_bbox_out` caches tract geometry reads by
+a coarsened bbox grid, so small pan jitters reuse the cached read instead
+of re-fetching; combined with a fix to stop the map recentering to
+`DEFAULT_CENTER` on every rerun, viewport panning no longer flickers.
+
+### 2. Tract Viewport Payload Size
+**Accepted, not fixed via canvas rendering.** Dense urban viewports (e.g.
+NYC, ~500+ tracts) are still noticeably less snappy per pan than the
+original Leaflet app's incremental DOM updates, because each pan is a full
+Streamlit script rerun. Documented as a deliberate, bounded trade-off in
+`CLAUDE.md`'s "Known UX deltas" section -- never a memory blowup, worst
+case a slower rerun.
+
+### 3. Startup Memory Profile
+**RESOLVED by design.** Tract geometry (the only level too big to hold
+fully in memory) is never loaded wholesale -- only attributes/adjacency
+are resident, geometry is read on demand per viewport via a spatially
+indexed `pyogrio` bbox read. This keeps memory bounded regardless of
+national tract count, specifically for Streamlit Community Cloud's ~1GB
+free tier. See `CLAUDE.md`'s "Data Layer" section.
+
+### 4. PDB Data Freshness
+**RESOLVED.** The app footer now displays a permanent caption: "Based on
+2017-2021 Census estimates -- order-of-magnitude, not exact."
+
+### 5. County Join Gap
+**Still open, low priority.** The ~$490B state/county total mismatch from
+FIPS formatting hasn't been investigated further. Minor impact on a
+teaching tool; not blocking.
+
+### 6. Very Small Wealth Values Produce Empty Results
+**RESOLVED.** The app now shows fractional homes instead of a dead end --
+"{target label} is smaller than a single {geography} here" plus "≈ 0.29
+homes at local median price" -- instead of a bare "nothing fits" message.
+
+### 7. Auto-Level Cascade in Expensive Areas
+**RESOLVED.** The cascade (state → county → tract) now surfaces via
+`st.toast` messages ("That single state exceeds $X. Switching to
+counties...") so the brief delay during cascade is explained rather than
+silent.
+
+### 8. Very Large Values and State Coverage
+**Accepted as inherent, not a bug.** The greedy contiguous-expansion
+algorithm can leave a large remaining budget unspent rather than break
+contiguity or exceed the target -- expected behavior for a teaching tool,
+unchanged since Iteration 1's algorithm decisions.

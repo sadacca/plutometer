@@ -11,36 +11,68 @@ percentile) tangible by mapping them onto real neighborhoods.
 
 ---
 
-## Active Branch
+## Development Workflow
 
-Development happens on `claude/plutometer-streamlit-deploy-x00tqg`. Push
-only to this branch unless told otherwise. The production app auto-deploys
-from `main` on Streamlit Community Cloud (see README.md for the one-time
-manual Streamlit Cloud connection step -- that part isn't automatable via
-GitHub Actions).
+Work happens on short-lived feature branches (`claude/<slug>-<id>`), one per
+task, each merged to `main` via its own PR -- there's no single long-lived
+"active branch" name to keep in sync here (three have already come and
+gone: `plutometer-streamlit-deploy-x00tqg`, `performance-responsiveness-
+03picn`, `tract-display-zoom-yjs4w1`). Check your task instructions or the
+repo's open PRs for whichever branch is current. The production app
+auto-deploys from `main` on Streamlit Community Cloud on every merge (see
+README.md for the one-time manual Streamlit Cloud connection step -- that
+part isn't automatable via GitHub Actions).
 
 ---
 
 ## App Structure
 
 Single-page Streamlit app, entrypoint `app/app.py`. Unlike a multi-tab
-dashboard, plutometer is one screen: a sidebar of controls + results, and a
-full-width interactive map. No `st.navigation` multipage split is needed.
+dashboard, plutometer is one screen: mobile-first, with the informative
+header + result above the map, the map itself, and interactive controls
+below it, so the whole click-to-see-result loop never requires opening the
+sidebar. No `st.navigation` multipage split is needed.
 
-- **Sidebar (controls, top of script)**: geography level (`state` / `county`
-  / `tract`), a reference-value dropdown populated from
-  `data/reference_values.csv`, a free-text custom-amount input (K/M/B/T
-  shorthand via `components/utils.parse_value`), the map overlay-mode radio
-  (median home price / total value / no fill), and a Clear Selection button.
+- **Header + result (main column, above the map)**: a static "🏠 How rich
+  are the rich, really?" title, then either the primary result as a styled
+  `.pm-stat-card` or (before any click) a dashed empty-state banner. The
+  result headline leads with *what's being compared* -- the picked
+  reference name + value from `data/reference_values.csv`, or "Custom
+  amount ($X)" -- followed by "≈ N whole {states/counties/neighborhoods}",
+  e.g. "Elon Musk Net Worth ($1.1T) ≈ 3 whole states"; this label is
+  threaded through `_run_computation()` into
+  `st.session_state.result_target_label` so it stays in sync with whichever
+  click produced the result on screen, not whatever the controls happen to
+  show this rerun. The caption line below gives the "how many houses"
+  context at both local and national median price. A "📍 Viewing:
+  {county}" caption and a data-vintage footer caption follow.
 - **Map (main area)**: built by `components/map_view.build_map()` and
   rendered via `streamlit_folium.st_folium()`. A CARTO light basemap, a
   gradient choropleth layer, and (once a click has been processed) a
   highlight layer for the selected GEOIDs drawn on top.
-- **Sidebar (results, rendered *after* the map+click-handling section so it
-  reflects the just-processed click in the same script run)**: "How many
-  houses could you buy?" primary block, then `st.expander`s for selection
-  details and area statistics, then the "About this tool" expander
-  (renders `data/educational_content.md`).
+- **Controls (main column, below the map)**: three columns -- geography
+  level (`state` / `county` / `tract`); a wealth-category selectbox
+  (grouped by `reference_values.csv`'s `category` column, default
+  "Super-Rich Individuals") feeding a second selectbox for the specific
+  amount within it, defaulting to Elon Musk's net worth so there's always a
+  result to look at on first load; and a free-text custom-amount input
+  (K/M/B/T shorthand via `components/utils.parse_value`), which overrides
+  the dropdown when present. Controls live below the map (not above, not in
+  the sidebar) so the map is the first thing seen on a mobile screen.
+- **Sidebar (collapsed by default, secondary settings only)**: the map
+  overlay-mode radio (median home price / total value / no fill), a Clear
+  Selection button, `st.expander`s for selection details and area
+  statistics (only once a result exists), and two `st.tabs`: "About this
+  tool" (renders `data/educational_content.md`) and "What does a dollar
+  buy?" (renders `data/scale_reference.md`, the order-of-magnitude
+  home/neighborhood/metro scale reference).
+- **Mobile whitespace**: custom CSS trims Streamlit's default
+  block-container top padding (~6rem, only ~60px of which is needed to
+  clear its fixed toolbar) and default 1rem inter-element gap, scoped to
+  the main column via `[data-testid="stMainBlockContainer"]` so the
+  sidebar's own spacing is untouched -- shifts the map and controls higher
+  on a mobile viewport without needing Streamlit-internal APIs beyond that
+  `data-testid` selector.
 - **Click handling**: `st_folium`'s `last_clicked` is compared against
   `st.session_state.last_clicked_processed` each rerun; a genuinely new
   click triggers `_run_computation()` (calls `algorithm.expand_contiguous`
@@ -193,7 +225,7 @@ Disclosed trade-offs from the Streamlit port, not regressions to "fix":
 
 ```
 app/
-  app.py                     # Streamlit entrypoint -- sidebar, map, click handling
+  app.py                     # Streamlit entrypoint -- header/result, map, controls, click handling
   algorithm.py                # expand_contiguous, find_nearest_geoid -- framework-agnostic, unchanged
   data_loader.py               # DataStore / GeographyData -- st.cache_resource, lean tract loading
   requirements.txt            # (see repo root requirements.txt -- app has none of its own)
@@ -219,10 +251,16 @@ data/                          # Committed except data/raw/ (gitignored, regener
   tract.fgb                              # Geometry + GEOID only, simplified, size-capped
   tract_values.parquet                   # Tract attributes (values/enrichment/centroids/names)
   cache/{state,county,tract}_adjacency.pkl  # Precomputed adjacency graphs
-  reference_values.csv                   # Target-value dropdown options
-  educational_content.md                 # "About this tool" sidebar text
+  reference_values.csv                   # Target-value dropdown options, grouped by `category`
+  educational_content.md                 # "About this tool" sidebar tab text
+  scale_reference.md                     # "What does a dollar buy?" sidebar tab -- order-of-magnitude
+                                          # home/neighborhood/metro scale reference
 
-requirements.md                # Original requirements spec
-context-archive.md             # Resolved design decisions from prior iterations
+requirements.md                # Original pre-build requirements sketch (envisioned FastAPI/PostGIS/
+                                # Leaflet+vector-tiles; shipped as Streamlit instead) -- historical
+issues-and-new-requirements.md # Iteration 2 feedback -- historical, fully resolved
+open-questions.md              # Iteration 3 open items -- historical, fully resolved
+context-archive.md             # Resolved design decisions from all prior iterations (current source
+                                # of truth for "why" on anything the three files above raised)
 README.md                      # Architecture + local run + deploy instructions
 ```

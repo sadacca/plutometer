@@ -72,6 +72,7 @@ After that, every push to `main` redeploys automatically.
 
 ## Requirements
 
-No secrets, no authentication. Data sources, algorithm details, and design
-decisions are in `requirements.md` and `context-archive.md`. Developer-facing
-architecture notes are in `CLAUDE.md`.
+No secrets, no authentication. `requirements.md` is the original pre-build
+spec (historical -- it envisioned a different tech stack than what shipped);
+`context-archive.md` records what was actually decided across every
+iteration since. For the current architecture, start with `CLAUDE.md`.

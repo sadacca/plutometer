@@ -1,3 +1,7 @@
+> **Status: historical, fully resolved.** This was Iteration 2 feedback.
+> Every item below shipped -- see `context-archive.md`'s "Iteration 2"
+> section for what each one became, and `CLAUDE.md` for the current app.
+
 ## Issues identified: 
 1. Too much clutter on righthand panel. 
 - Bring the section "Houses equal to target" to the top of the panel
