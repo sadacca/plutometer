@@ -1,5 +1,10 @@
 # Open Questions — Iteration 3
 
+> **Status: historical, fully resolved.** Every "REMAINING" and "EDGE
+> CASES" item below has since shipped or been explicitly accepted as a
+> documented trade-off -- see `context-archive.md`'s "Iteration 3" section
+> for what each one became, and `CLAUDE.md` for the current app.
+
 All UX/design questions resolved. Remaining items are implementation/deployment observations and edge cases discovered during integration testing.
 
 ---

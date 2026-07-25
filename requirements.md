@@ -1,5 +1,15 @@
 # Requirements Sketch: Residential Value Choropleth Application
 
+> **Status: historical.** This is the original pre-build spec, written
+> before implementation started. It envisioned a FastAPI + PostGIS +
+> Leaflet + vector-tiles stack (see "Suggested Technology Stack" and "API
+> Endpoints" below); the app that actually shipped is a single-process
+> Streamlit app with no database, no API layer, and no vector tiles --
+> see `CLAUDE.md` for what's real today. The functional requirements and
+> algorithm below were substantially implemented as described; the
+> "Open Questions" section at the bottom is fully resolved and duplicated
+> in `context-archive.md`.
+
 ## Overview
 
 A Python web application displaying an interactive choropleth map of the continental US. Users select a point on the map and a target dollar value (from a reference list). The system identifies the largest contiguous set of geographies, expanding outward from the mapspot, whose cumulative residential real estate value does not exceed the target, then colors those geographies on the map.
