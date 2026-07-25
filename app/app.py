@@ -96,6 +96,18 @@ st.markdown(
          frame rendering as a broken sliver during that brief window. */
       min-height: 200px;
     }
+    /* Streamlit's default top padding (~6rem) leaves ~36px of dead space beyond
+       what's needed to clear its own fixed toolbar (measured ~60px tall) -- on
+       a single mobile screen whose whole point is showing the map *and* the
+       controls below it without scrolling, that's space worth reclaiming.
+       Scoped to the main column (not the sidebar) so its own spacing is
+       untouched. 4.5rem keeps a small buffer under the toolbar. */
+    [data-testid="stMainBlockContainer"] {
+      padding-top: 4.5rem;
+    }
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
+      gap: 0.5rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -112,6 +124,7 @@ _STATE_DEFAULTS = {
     "result_level": None,
     "result_national_median": 0.0,
     "result_national_houses": 0.0,
+    "result_target_label": "",
     "status": "Tap the map to get started.",
 }
 for _k, _v in _STATE_DEFAULTS.items():
@@ -141,7 +154,9 @@ def _stat_card_html(headline: str, caption: str) -> str:
     return f'<div class="pm-stat-card"><div class="pm-stat-headline">{headline}</div><div class="pm-stat-caption">{caption}</div></div>'
 
 
-def _run_computation(lat: float, lon: float, target_value: float, level: str, depth: int = 0) -> None:
+def _run_computation(
+    lat: float, lon: float, target_value: float, level: str, target_label: str, depth: int = 0
+) -> None:
     geo_data = store.get_level(level)
     if geo_data is None or not geo_data.centroids:
         st.session_state.status = f"No data loaded for {LEVEL_LABELS.get(level, level)} yet."
@@ -174,7 +189,7 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
             if next_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.map_zoom = TRACT_MIN_ZOOM
                 st.toast("Zooming in to show neighborhood boundaries...")
-            _run_computation(lat, lon, target_value, next_level, depth=depth + 1)
+            _run_computation(lat, lon, target_value, next_level, target_label, depth=depth + 1)
             return
 
     national_median = store.national_median_home_value
@@ -184,6 +199,7 @@ def _run_computation(lat: float, lon: float, target_value: float, level: str, de
     st.session_state.result_level = level
     st.session_state.result_national_median = national_median
     st.session_state.result_national_houses = national_houses
+    st.session_state.result_target_label = target_label
     st.session_state.marker = (lat, lon)
     st.session_state.status = (
         f"{fmt_num(result.num_selected)} {geo_label(level, result.num_selected)} = {fmt_dollar(result.total_value)}"
@@ -300,16 +316,20 @@ with st.sidebar:
 # ------------------------------------------------------------------ main: header + map --
 # Informative text (title + result) stays compact above the map; interactive
 # controls live below it. The result, when present, is the actual payoff of
-# the tool, so it gets two lines -- a bold headline equation sized above the
-# app title, then a caption with the "how many houses" context below it --
-# rather than one dense run-on line that buries the numbers.
+# the tool, so it gets two lines -- a bold headline naming what's being
+# compared (the target label + value picked below, e.g. "Elon Musk Net Worth
+# ($1.1T)") against what it bought, then a caption with the "how many houses"
+# context below it -- rather than one dense run-on line that buries the
+# numbers, or a headline that shows the resulting area's value without ever
+# saying what it was being measured against.
 
 st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
 result = st.session_state.result
+target_label = st.session_state.result_target_label
 if result is not None and result.num_selected > 0:
     label = geo_label(st.session_state.result_level, result.num_selected)
-    headline = f"{fmt_num(result.num_selected)} {label} = {fmt_dollar(result.total_value)}"
+    headline = f"{target_label} ≈ {fmt_num(result.num_selected)} {label}"
     caption = (
         f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
         f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
@@ -472,7 +492,12 @@ with c3:
     if custom_raw and custom_parsed is None:
         st.caption("Couldn't read that — try formats like 500B or 1.5T")
 
-target_value = custom_parsed if custom_parsed else ref_options.get(ref_choice)
+if custom_parsed:
+    target_value = custom_parsed
+    target_label = f"Custom amount ({fmt_dollar(target_value)})"
+else:
+    target_value = ref_options.get(ref_choice)
+    target_label = ref_choice
 
 if map_data:
     if map_data.get("zoom") is not None:
@@ -500,5 +525,7 @@ if map_data:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
                 with st.spinner("Finding the largest area that fits..."):
-                    _run_computation(clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level)
+                    _run_computation(
+                        clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level, target_label
+                    )
                 st.rerun()
