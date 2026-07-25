@@ -345,7 +345,10 @@ elif result is not None and result.area_median_home_value > 0:
     # fractional_headline tiers the wording by actual house count -- a flat
     # "smaller than a whole neighborhood" reads the same whether the money
     # buys 3 houses or 300, since a tract can hold hundreds to thousands.
-    headline = fractional_headline(st.session_state.result_level, result.median_houses_to_target)
+    # Still led by target_label so this stays consistent with the
+    # num_selected > 0 branch above -- the reader always sees what dollar
+    # figure produced the result, not just what it bought.
+    headline = f"{target_label}: {fractional_headline(st.session_state.result_level, result.median_houses_to_target)}"
     caption = (
         f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
         f" ({fmt_dollar(result.area_median_home_value)})"

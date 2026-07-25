@@ -38,8 +38,16 @@ sidebar. No `st.navigation` multipage split is needed.
   `.pm-stat-card` or (before any click) a dashed empty-state banner. The
   result headline leads with *what's being compared* -- the picked
   reference name + value from `data/reference_values.csv`, or "Custom
-  amount ($X)" -- followed by "≈ N whole {states/counties/neighborhoods}",
-  e.g. "Elon Musk Net Worth ($1.1T) ≈ 3 whole states"; this label is
+  amount ($X)" -- followed by either "≈ N whole
+  {states/counties/neighborhoods}" when at least one full geography fits
+  (e.g. "Elon Musk Net Worth ($1.1T) ≈ 3 whole states"), or, when the
+  target undercuts even the single smallest geography reached
+  (`num_selected == 0`), `components/utils.fractional_headline()`'s
+  house-count-tiered phrase ("Part of a house here" / "A few houses here"
+  / "Part of a {state/county/neighborhood} here" for under 1 / up to
+  `FEW_HOUSES_MAX` / more houses, respectively) -- a flat "smaller than a
+  whole neighborhood" reads the same whether the money buys 3 houses or
+  300, since a tract can hold hundreds to thousands of homes. This label is
   threaded through `_run_computation()` into
   `st.session_state.result_target_label` so it stays in sync with whichever
   click produced the result on screen, not whatever the controls happen to
