@@ -12,19 +12,18 @@ below for exactly where the soft spots are.
 ## The method
 
 Home prices vary a lot by market, so each amount below is given as a
-**range**, bounded by Zillow's national home-value tiers¹ — the typical
-value of homes in the bottom third versus the top third of each local
-market's own price distribution, tracked home-by-home and then aggregated
-nationally:
+**range**, bounded by the national 25th and 75th percentile of *individual*
+home values¹ — not geography-level medians, but where a single house
+actually sits among all ~86.6 million owner-occupied homes nationally
+(Census ACS 2024):
 
-- **Bottom-third typical value ≈ \$202,000** (homes in the 0th-33rd
-  percentile of their local market, June 2026) sets the *upper* bound on
-  how much a given amount buys.
-- **Top-third typical value ≈ \$718,000** (homes in the 67th-100th
-  percentile of their local market, June 2026) sets the *lower* bound.
+- **25th percentile ≈ \$209,000** (cheaper individual homes) sets the
+  *upper* bound on how much a given amount buys.
+- **75th percentile ≈ \$604,000** (pricier individual homes) sets the
+  *lower* bound.
 
-So "\$1M buys 1 to 5 homes" means: among the priciest homes nationally
-that's barely more than one house, among the more modest ones, several.
+So "\$1M buys 2 to 5 homes" means: among pricier individual homes that's
+closer to 2, among more modest ones, closer to 5.
 
 Above the scale of a handful of houses, house counts stop being legible,
 so larger amounts are expressed in geography-sized units instead — a
@@ -33,18 +32,17 @@ so larger amounts are expressed in geography-sized units instead — a
 
 ## The scale
 
-- **\$100K** — roughly a **seventh to half of a single home**.
-- **\$1M** — about **1 to 5 homes** — in the priciest markets that's
-  barely one house; in the more modest ones, a small handful.
-- **\$10M** — about **14 to 50 homes**, roughly one to several city
+- **\$100K** — roughly a **sixth to half of a single home**.
+- **\$1M** — about **2 to 5 homes**, a small handful.
+- **\$10M** — about **17 to 48 homes**, roughly one to several city
   blocks.
-- **\$100M** — roughly a **seventh to half of one neighborhood**
-  (~139-495 homes).
-- **\$1B** — about **1 to 5 neighborhoods**.
-- **\$10B** — dozens of neighborhoods (~14-50) — roughly a **fifth to
+- **\$100M** — roughly a **sixth to half of one neighborhood**
+  (~166-478 homes).
+- **\$1B** — about **2 to 5 neighborhoods**.
+- **\$10B** — dozens of neighborhoods (~17-48) — roughly a **fifth to
   two-thirds of one metro area**.
-- **\$100B** — about **2 to 7 metro areas**.
-- **\$1T** — about **19 to 66 metro areas**, several dozen.
+- **\$100B** — about **2 to 6 metro areas**.
+- **\$1T** — about **22 to 64 metro areas**, several dozen.
 
 Notice the pattern repeats at every scale: \$100K is a fraction of a home,
 and \$100M — a thousand times more — is that same fraction of a
@@ -53,40 +51,43 @@ any amount you pick.
 
 ## Assumptions & limits
 
-1. **These bounds now come from Zillow's home-value tiers, not this app's
-   own tract data — and here's why that swap matters.** Earlier versions
-   of this page bounded the range with the national 25th/75th percentile
-   of this app's own tract-level *median* home values (~83,500 Census
-   tracts, ACS 2017-2021). That's the wrong statistic for this job: a
-   census tract's median nets out all the internal variation among the
-   houses inside it, so the spread *between* tract medians is a
-   compressed shadow of the true, much wider spread between individual
-   homes nationally. Two houses in the same tract routinely differ by
-   3-5x in value; a tract-median interquartile range never sees that.
-   Zillow's tiered Home Value Index (ZHVI) figures fix this because
-   they're built from individual homes' estimated values, ranked within
-   their own local market, and *then* aggregated — a percentile band over
-   houses, not over geographies. Figures used here (national, seasonally
-   adjusted, June 2026, from Zillow's own bulk data exports): bottom
-   third (0th-33rd percentile of each market) = **\$202,486**, middle
-   third (33rd-67th percentile) = **\$372,057**, top third (67th-100th
-   percentile) = **\$717,993**. One data-quality wrinkle: the bottom- and
-   top-third series come smoothed/seasonally-adjusted, while the
-   middle-third series pulled for this update wasn't — a source-file
-   mismatch, not a modeling choice, though the effect is well under 1% at
-   this order-of-magnitude. As an independent cross-check, Redfin's June
-   2026 national *median sale price* (actual closed transactions, not
-   estimated stock value) was \$408,776 — sitting between the middle and
-   top ZHVI tiers, which makes sense: recent buyers skew toward pricier,
-   more move-up homes than the full owned housing stock these tiers
-   describe. Two residual caveats even with real per-tier figures: (a)
-   each tier is a *within-region* percentile — a population-weighted
-   blend of every market's own cheapest/priciest third, not a literal
-   percentile of all ~86 million U.S. homes pooled together — so the true
-   national spread is likely wider still; (b) prices move quickly and
-   these figures will drift out of date the same way the old ACS-based
-   ones did. Treat every count on this page as good to a factor of ~2,
-   not a factor of ~1.2.
+1. **These bounds come from a real national histogram of individual homes,
+   not a percentile of geography-level medians or market tiers — and it's
+   worth being honest about how that changed the numbers.** The original
+   version of this page used the 25th/75th percentile of this app's own
+   tract-level *median* home values (~83,500 Census tracts) — the wrong
+   statistic, since a tract median nets out the variation among the houses
+   inside it. A later version switched to Zillow's within-market home-value
+   tiers (bottom/top third of each local market, aggregated nationally),
+   which fixed the "median of medians" problem but is still a percentile
+   *within each market*, not a literal percentile of all homes pooled
+   together nationally. This version uses Census ACS Table B25075
+   ("Value"), which reports, for the nation as a whole, how many
+   owner-occupied homes fall into each of 26 value bins from "less than
+   \$10,000" up to "\$2,000,000 or more" — a genuine nationally-pooled
+   histogram of ~86.6 million individual homes. Percentiles are
+   interpolated linearly within bins: **5th ≈ \$50,000, 10th ≈ \$98,000,
+   25th ≈ \$209,000, median ≈ \$361,000, 75th ≈ \$604,000, 90th ≈
+   \$934,000, 95th ≈ \$1,351,000** (2024 1-year estimates, the most recent
+   available; the 99th percentile can't be pinned down because the top bin
+   is open-ended at "\$2,000,000 or more," which holds about 2.2% of all
+   owner-occupied homes). Two things worth flagging plainly: **the
+   resulting 25th-75th band ($209K-$604K) is actually a bit *narrower*
+   than the Zillow-tier band this page used previously ($202K-$718K)**,
+   not wider — Zillow's "top-third typical value" is the median of the
+   top third of each market, which behaves more like the *83rd*
+   percentile of the whole distribution than the 75th, so the two
+   figures were never quite measuring the same thing. This version's
+   number is the more literally correct answer to "25th/75th percentile
+   of individual homes," even though it happens to be the narrower one.
+   And **the true full spread is far wider than any quartile band shows**
+   — the 10th-90th percentile alone runs \$98,000 to \$934,000, nearly a
+   10x span, and ACS home values are owner-*reported* estimates rather
+   than appraisals or sale prices, which tend to run high at the cheap end
+   and low at the expensive end relative to true market value, likely
+   compressing this distribution somewhat versus reality. Every count on
+   this page should be read as illustrative of a plausible middle range,
+   not as bounding the extremes.
 2. **"Block" and "neighborhood" are informal, round-number conventions**
    picked for this tool, not official Census geography. A real block or
    neighborhood varies enormously in size by city and density.
