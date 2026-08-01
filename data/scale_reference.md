@@ -17,11 +17,11 @@ value of homes in the bottom third versus the top third of each local
 market's own price distribution, tracked home-by-home and then aggregated
 nationally:
 
-- **Bottom-tier typical value ≈ \$200,000** (homes in the 5th-35th
-  percentile of their local market) sets the *upper* bound on how much a
-  given amount buys.
-- **Top-tier typical value ≈ \$700,000** (homes in the 65th-95th
-  percentile of their local market) sets the *lower* bound.
+- **Bottom-third typical value ≈ \$202,000** (homes in the 0th-33rd
+  percentile of their local market, June 2026) sets the *upper* bound on
+  how much a given amount buys.
+- **Top-third typical value ≈ \$718,000** (homes in the 67th-100th
+  percentile of their local market, June 2026) sets the *lower* bound.
 
 So "\$1M buys 1 to 5 homes" means: among the priciest homes nationally
 that's barely more than one house, among the more modest ones, several.
@@ -39,12 +39,12 @@ so larger amounts are expressed in geography-sized units instead — a
 - **\$10M** — about **14 to 50 homes**, roughly one to several city
   blocks.
 - **\$100M** — roughly a **seventh to half of one neighborhood**
-  (~143-500 homes).
+  (~139-495 homes).
 - **\$1B** — about **1 to 5 neighborhoods**.
 - **\$10B** — dozens of neighborhoods (~14-50) — roughly a **fifth to
   two-thirds of one metro area**.
 - **\$100B** — about **2 to 7 metro areas**.
-- **\$1T** — about **19 to 67 metro areas**, several dozen.
+- **\$1T** — about **19 to 66 metro areas**, several dozen.
 
 Notice the pattern repeats at every scale: \$100K is a fraction of a home,
 and \$100M — a thousand times more — is that same fraction of a
@@ -63,25 +63,30 @@ any amount you pick.
    compressed shadow of the true, much wider spread between individual
    homes nationally. Two houses in the same tract routinely differ by
    3-5x in value; a tract-median interquartile range never sees that.
-   Zillow's bottom-tier and top-tier Home Value Index (ZHVI) figures fix
-   this because they're built from individual homes' estimated values,
-   ranked within their own local market, and *then* aggregated — a
-   percentile band over houses, not over geographies. Current figures
-   (mid-2026): bottom tier (5th-35th percentile) ≈ **\$200,000**, typical
-   "all homes" ZHVI (35th-65th percentile, the market's overall midpoint)
-   ≈ **\$370,000**, top tier (65th-95th percentile) ≈ **\$700,000** — this
-   last figure is this page's softest input: no separately-published
-   current top-tier dollar figure could be retrieved while updating this
-   page, so it's estimated by applying Zillow's own recently-reported
-   bottom-to-top tier ratio (roughly 3.2-3.8x across recent years) to the
-   current bottom-tier value. Two residual caveats even with this better
-   source: (a) each tier is a *within-region* percentile — a population-
-   weighted blend of every market's own cheapest/priciest third, not a
-   literal percentile of all ~86 million U.S. homes pooled together — so
-   the true national spread is likely wider still; (b) prices move
-   quickly and these figures will drift out of date the same way the old
-   ACS-based ones did. Treat every count on this page as good to a factor
-   of ~2, not a factor of ~1.2.
+   Zillow's tiered Home Value Index (ZHVI) figures fix this because
+   they're built from individual homes' estimated values, ranked within
+   their own local market, and *then* aggregated — a percentile band over
+   houses, not over geographies. Figures used here (national, seasonally
+   adjusted, June 2026, from Zillow's own bulk data exports): bottom
+   third (0th-33rd percentile of each market) = **\$202,486**, middle
+   third (33rd-67th percentile) = **\$372,057**, top third (67th-100th
+   percentile) = **\$717,993**. One data-quality wrinkle: the bottom- and
+   top-third series come smoothed/seasonally-adjusted, while the
+   middle-third series pulled for this update wasn't — a source-file
+   mismatch, not a modeling choice, though the effect is well under 1% at
+   this order-of-magnitude. As an independent cross-check, Redfin's June
+   2026 national *median sale price* (actual closed transactions, not
+   estimated stock value) was \$408,776 — sitting between the middle and
+   top ZHVI tiers, which makes sense: recent buyers skew toward pricier,
+   more move-up homes than the full owned housing stock these tiers
+   describe. Two residual caveats even with real per-tier figures: (a)
+   each tier is a *within-region* percentile — a population-weighted
+   blend of every market's own cheapest/priciest third, not a literal
+   percentile of all ~86 million U.S. homes pooled together — so the true
+   national spread is likely wider still; (b) prices move quickly and
+   these figures will drift out of date the same way the old ACS-based
+   ones did. Treat every count on this page as good to a factor of ~2,
+   not a factor of ~1.2.
 2. **"Block" and "neighborhood" are informal, round-number conventions**
    picked for this tool, not official Census geography. A real block or
    neighborhood varies enormously in size by city and density.
