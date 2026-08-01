@@ -12,16 +12,19 @@ below for exactly where the soft spots are.
 ## The method
 
 Home prices vary a lot by market, so each amount below is given as a
-**range**, bounded by the national 25th and 75th percentile home value¹
-(household-weighted across all ~83,500 U.S. Census tracts, ACS 2017–2021 —
-the same data the map itself uses):
+**range**, bounded by Zillow's national home-value tiers¹ — the typical
+value of homes in the bottom third versus the top third of each local
+market's own price distribution, tracked home-by-home and then aggregated
+nationally:
 
-- **25th percentile ≈ \$148,000** (cheaper markets) sets the *upper* bound
-  on how much a given amount buys.
-- **75th percentile ≈ \$372,000** (pricier markets) sets the *lower* bound.
+- **Bottom-tier typical value ≈ \$200,000** (homes in the 5th-35th
+  percentile of their local market) sets the *upper* bound on how much a
+  given amount buys.
+- **Top-tier typical value ≈ \$700,000** (homes in the 65th-95th
+  percentile of their local market) sets the *lower* bound.
 
-So "\$1M buys 3 to 7 homes" means: in the priciest quarter of the country
-that's closer to 3, in the cheapest quarter closer to 7.
+So "\$1M buys 1 to 5 homes" means: among the priciest homes nationally
+that's barely more than one house, among the more modest ones, several.
 
 Above the scale of a handful of houses, house counts stop being legible,
 so larger amounts are expressed in geography-sized units instead — a
@@ -30,16 +33,18 @@ so larger amounts are expressed in geography-sized units instead — a
 
 ## The scale
 
-- **\$100K** — roughly a **quarter to two-thirds of a single home**.
-- **\$1M** — about **3 to 7 homes**, a handful.
-- **\$10M** — about **27 to 68 homes**, roughly one to four city blocks.
-- **\$100M** — roughly a **quarter to two-thirds of one neighborhood**
-  (~270-680 homes).
-- **\$1B** — about **3 to 7 neighborhoods**, a handful.
-- **\$10B** — dozens of neighborhoods (~27-68) — roughly a **third to
-  nearly all of one metro area**.
-- **\$100B** — about **4 to 9 metro areas**.
-- **\$1T** — about **36 to 90 metro areas**, several dozen.
+- **\$100K** — roughly a **seventh to half of a single home**.
+- **\$1M** — about **1 to 5 homes** — in the priciest markets that's
+  barely one house; in the more modest ones, a small handful.
+- **\$10M** — about **14 to 50 homes**, roughly one to several city
+  blocks.
+- **\$100M** — roughly a **seventh to half of one neighborhood**
+  (~143-500 homes).
+- **\$1B** — about **1 to 5 neighborhoods**.
+- **\$10B** — dozens of neighborhoods (~14-50) — roughly a **fifth to
+  two-thirds of one metro area**.
+- **\$100B** — about **2 to 7 metro areas**.
+- **\$1T** — about **19 to 67 metro areas**, several dozen.
 
 Notice the pattern repeats at every scale: \$100K is a fraction of a home,
 and \$100M — a thousand times more — is that same fraction of a
@@ -48,23 +53,35 @@ any amount you pick.
 
 ## Assumptions & limits
 
-1. **Percentile bounds are ACS estimates, not appraisals — and they lag
-   current prices by more than a rounding error.** The \$148,000 /
-   \$372,000 figures come from this app's own tract-level data — Census
-   *American Community Survey* 5-year estimates, which carry margins of
-   error (especially at the tract level) and are pegged to the 2017-2021
-   survey window (effectively ~2019 price levels). Zillow's national
-   typical home value (ZHVI) is running **~\$368,000-\$370,000 as of
-   2026** — right around where this app's *75th-percentile, priciest-market*
-   bound sits, not its median. National residential real estate's total
-   value has followed the same path: Zillow put it at a record \$55.1
-   trillion in September 2025, versus the \$41.5 trillion implied by
-   summing this app's ACS-vintage tract data. In other words, prices
-   nationally have risen roughly 40-60% since this data's vintage, so
-   every home-count figure above is probably **overstated by a similar
-   margin relative to today's market** — "\$1M buys 3 to 7 homes" is
-   closer to "2 to 5 homes" at 2026 prices. Real local prices can also
-   fall well outside this 25th-75th range regardless of vintage.
+1. **These bounds now come from Zillow's home-value tiers, not this app's
+   own tract data — and here's why that swap matters.** Earlier versions
+   of this page bounded the range with the national 25th/75th percentile
+   of this app's own tract-level *median* home values (~83,500 Census
+   tracts, ACS 2017-2021). That's the wrong statistic for this job: a
+   census tract's median nets out all the internal variation among the
+   houses inside it, so the spread *between* tract medians is a
+   compressed shadow of the true, much wider spread between individual
+   homes nationally. Two houses in the same tract routinely differ by
+   3-5x in value; a tract-median interquartile range never sees that.
+   Zillow's bottom-tier and top-tier Home Value Index (ZHVI) figures fix
+   this because they're built from individual homes' estimated values,
+   ranked within their own local market, and *then* aggregated — a
+   percentile band over houses, not over geographies. Current figures
+   (mid-2026): bottom tier (5th-35th percentile) ≈ **\$200,000**, typical
+   "all homes" ZHVI (35th-65th percentile, the market's overall midpoint)
+   ≈ **\$370,000**, top tier (65th-95th percentile) ≈ **\$700,000** — this
+   last figure is this page's softest input: no separately-published
+   current top-tier dollar figure could be retrieved while updating this
+   page, so it's estimated by applying Zillow's own recently-reported
+   bottom-to-top tier ratio (roughly 3.2-3.8x across recent years) to the
+   current bottom-tier value. Two residual caveats even with this better
+   source: (a) each tier is a *within-region* percentile — a population-
+   weighted blend of every market's own cheapest/priciest third, not a
+   literal percentile of all ~86 million U.S. homes pooled together — so
+   the true national spread is likely wider still; (b) prices move
+   quickly and these figures will drift out of date the same way the old
+   ACS-based ones did. Treat every count on this page as good to a factor
+   of ~2, not a factor of ~1.2.
 2. **"Block" and "neighborhood" are informal, round-number conventions**
    picked for this tool, not official Census geography. A real block or
    neighborhood varies enormously in size by city and density.
