@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import streamlit as st
 from streamlit_folium import st_folium
 
-from algorithm import expand_contiguous, find_nearest_geoid
+from algorithm import expand_contiguous
 from data_loader import load_store
 from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
@@ -162,7 +162,7 @@ def _run_computation(
         st.session_state.status = f"No data loaded for {LEVEL_LABELS.get(level, level)} yet."
         return
 
-    start_geoid = find_nearest_geoid(lat, lon, geo_data.centroids)
+    start_geoid = geo_data.nearest_geoid(lat, lon)
     result = expand_contiguous(
         start_geoid=start_geoid,
         target_value=target_value,
@@ -369,7 +369,7 @@ if st.session_state.marker is not None:
     county_data = store.get_level("county")
     if county_data is not None and county_data.centroids:
         lat, lon = st.session_state.marker
-        nearest_county = find_nearest_geoid(lat, lon, county_data.centroids)
+        nearest_county = county_data.nearest_geoid(lat, lon)
         county_name = county_data.names.get(nearest_county)
         if county_name:
             st.caption(f"\U0001F4CD Viewing: {county_name}")
