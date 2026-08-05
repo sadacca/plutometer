@@ -6,6 +6,7 @@ find the largest contiguous set of geographies expanding outward from the
 mapspot whose total residential value does not exceed the target.
 """
 
+import heapq
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -127,12 +128,6 @@ def expand_contiguous(
     selected.add(start_geoid)
     running_total += start_val
 
-    # Build frontier
-    frontier = set()
-    for neighbor in adjacency.get(start_geoid, set()):
-        if neighbor not in selected and neighbor in values:
-            frontier.add(neighbor)
-
     # Distance cache
     distances: dict[str, float] = {}
 
@@ -142,30 +137,35 @@ def expand_contiguous(
             distances[geoid] = haversine_km(mapspot_lon, mapspot_lat, c[0], c[1])
         return distances[geoid]
 
-    # Greedy expansion
+    # Greedy expansion via a min-heap of (distance, geoid) frontier candidates,
+    # nearest-first. Geography values are always >= 0, so running_total only
+    # grows -- a candidate that doesn't fit under the current running_total can
+    # never fit later, so a rejected candidate is discarded permanently rather
+    # than re-considered (equivalent to re-sorting the whole remaining frontier
+    # on every pass, just without redoing that sort).
+    frontier: list[tuple[float, str]] = []
+    in_frontier: set[str] = set()
+
+    def push(geoid: str) -> None:
+        if geoid not in selected and geoid not in in_frontier and geoid in values:
+            heapq.heappush(frontier, (get_distance(geoid), geoid))
+            in_frontier.add(geoid)
+
+    for neighbor in adjacency.get(start_geoid, set()):
+        push(neighbor)
+
     while frontier:
-        candidates = sorted(frontier, key=get_distance)
+        dist, candidate = heapq.heappop(frontier)
+        in_frontier.discard(candidate)
 
-        added_any = False
-        for candidate in candidates:
-            candidate_val = values.get(candidate, 0)
-            if running_total + candidate_val <= target_value:
-                selected.add(candidate)
-                running_total += candidate_val
-                frontier.discard(candidate)
+        candidate_val = values.get(candidate, 0)
+        if running_total + candidate_val <= target_value:
+            selected.add(candidate)
+            running_total += candidate_val
+            furthest_dist = max(furthest_dist, dist)
 
-                dist = get_distance(candidate)
-                furthest_dist = max(furthest_dist, dist)
-
-                for neighbor in adjacency.get(candidate, set()):
-                    if neighbor not in selected and neighbor in values:
-                        frontier.add(neighbor)
-
-                added_any = True
-                break
-
-        if not added_any:
-            break
+            for neighbor in adjacency.get(candidate, set()):
+                push(neighbor)
 
     # Compute enrichment stats
     area_income = 0.0

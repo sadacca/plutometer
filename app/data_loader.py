@@ -20,8 +20,10 @@ import pickle
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.spatial import KDTree
 from shapely.geometry import box
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -58,31 +60,49 @@ class GeographyData:
             zip(attrs_df["GEOID"], attrs_df["NAME"].fillna(attrs_df["GEOID"]))
         )
         self.enrichment: dict[str, dict] = {
-            row["GEOID"]: {
-                "housing_units": float(row.get("housing_units", 0) or 0),
-                "median_home_value": float(row.get("median_home_value", 0) or 0),
-                "median_income": float(row.get("median_income", 0) or 0),
+            geoid: {
+                "housing_units": float(hu or 0),
+                "median_home_value": float(mhv or 0),
+                "median_income": float(mi or 0),
             }
-            for _, row in attrs_df.iterrows()
+            for geoid, hu, mhv, mi in zip(
+                attrs_df["GEOID"],
+                attrs_df["housing_units"] if "housing_units" in attrs_df.columns else [0] * len(attrs_df),
+                attrs_df["median_home_value"] if "median_home_value" in attrs_df.columns else [0] * len(attrs_df),
+                attrs_df["median_income"] if "median_income" in attrs_df.columns else [0] * len(attrs_df),
+            )
         }
 
         if "centroid_lon" in attrs_df.columns:
-            self.centroids: dict[str, tuple[float, float]] = {
-                row["GEOID"]: (row["centroid_lon"], row["centroid_lat"])
-                for _, row in attrs_df.iterrows()
-            }
+            self.centroids: dict[str, tuple[float, float]] = dict(
+                zip(attrs_df["GEOID"], zip(attrs_df["centroid_lon"], attrs_df["centroid_lat"]))
+            )
         elif full_gdf is not None:
             c = full_gdf.geometry.to_crs(_CENTROID_CRS).centroid.set_crs(_CENTROID_CRS).to_crs(4326)
             self.centroids = {geoid: (pt.x, pt.y) for geoid, pt in zip(full_gdf["GEOID"], c)}
         else:
             self.centroids = {}
 
+        # Nearest-neighbor lookup tree, built once here (inside load_store()'s
+        # st.cache_resource) rather than per-click/per-rerun -- see nearest_geoid().
+        if self.centroids:
+            self._nn_geoids = list(self.centroids.keys())
+            self._nn_tree = KDTree(np.array([self.centroids[g] for g in self._nn_geoids]))
+        else:
+            self._nn_geoids = []
+            self._nn_tree = None
+
+    def nearest_geoid(self, lat: float, lon: float) -> str | None:
+        """GEOID whose centroid is nearest to the given point, via the precomputed KD-tree."""
+        if self._nn_tree is None:
+            return None
+        _, idx = self._nn_tree.query([lon, lat])
+        return self._nn_geoids[idx]
+
     def viewport_gdf(self, bbox: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
         """Geometry for the current map viewport, joined with attributes for styling/tooltips."""
         if self.full_gdf is not None:
-            minx, miny, maxx, maxy = bbox
-            mask = self.full_gdf.geometry.intersects(box(minx, miny, maxx, maxy))
-            return self.full_gdf[mask]
+            return _read_full_gdf_viewport(self.full_gdf, self.level, _round_bbox_out(bbox))
         if self.fgb_path is None:
             return gpd.GeoDataFrame()
         geom = _read_tract_viewport(str(self.fgb_path), _round_bbox_out(bbox))
@@ -101,10 +121,25 @@ def _round_bbox_out(bbox: tuple[float, float, float, float], precision: int = 3)
     )
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=128)
 def _read_tract_viewport(fgb_path: str, bbox: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
     """Spatially-indexed partial read of the tract geometry file -- never loads the whole thing."""
     return gpd.read_file(fgb_path, bbox=bbox, engine="pyogrio")
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _read_full_gdf_viewport(
+    _full_gdf: gpd.GeoDataFrame, level: str, bbox: tuple[float, float, float, float]
+) -> gpd.GeoDataFrame:
+    """Intersects-filtered slice of an in-memory (state/county) GeoDataFrame, keyed on the
+    rounded bbox (and level, since both levels' caches share this function) rather than on
+    _full_gdf itself -- leading underscore excludes it from Streamlit's cache hash. Reruns
+    that don't change the render bbox -- typing in the amount box, toggling the overlay
+    radio -- skip recomputing the geometric predicate over the whole GeoDataFrame.
+    """
+    minx, miny, maxx, maxy = bbox
+    mask = _full_gdf.geometry.intersects(box(minx, miny, maxx, maxy))
+    return _full_gdf[mask]
 
 
 def _load_adjacency(level: str) -> dict[str, set[str]]:
@@ -165,12 +200,11 @@ def load_store() -> DataStore:
         store.levels["tract"] = GeographyData("tract", attrs_df, adjacency, fgb_path=fgb_path)
 
     if "tract" in store.levels:
-        tract = store.levels["tract"]
-        total_units = sum(e["housing_units"] for e in tract.enrichment.values())
+        tract_attrs = store.levels["tract"]._attrs_df
+        housing_units = tract_attrs["housing_units"].fillna(0)
+        total_units = housing_units.sum()
         if total_units > 0:
-            weighted_sum = sum(
-                e["median_home_value"] * e["housing_units"] for e in tract.enrichment.values()
-            )
+            weighted_sum = (tract_attrs["median_home_value"].fillna(0) * housing_units).sum()
             store.national_median_home_value = weighted_sum / total_units
 
     return store
