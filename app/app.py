@@ -494,6 +494,8 @@ with c3:
     custom_parsed = parse_value(custom_raw)
     if custom_raw and custom_parsed is None:
         st.caption("Couldn't read that — try formats like 500B or 1.5T")
+    elif custom_raw and custom_parsed == 0:
+        st.caption("Enter an amount greater than $0")
 
 if custom_parsed:
     target_value = custom_parsed
