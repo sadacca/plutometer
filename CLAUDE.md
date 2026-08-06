@@ -181,6 +181,19 @@ intersects) is precomputed for all three levels by the `adjacency` stage and
 pickled to `data/cache/*.pkl`, committed to git. The deployed app only ever
 *loads* these caches; it never rebuilds an adjacency graph at runtime.
 
+**Connecticut GEOID crosswalk**: in June 2022 the Census Bureau retired CT's
+8 counties (FIPS `09001`-`09015`) for 9 new planning-region county-equivalents
+(FIPS `09110`-`09190`) in TIGER/cartographic products, but PDB (ACS 2017-2021
+vintage) still reports the old scheme -- a plain GEOID merge matches zero CT
+rows and every CT county/tract silently renders as $0 (blank on the map)
+instead of erroring. `_fix_ct_geoids`/`_ct_geoid_crosswalk` in
+`prepare_data.py` self-derive a crosswalk from the boundary file's own tract
+GEOIDs (tract numbers -- the GEOID's last 6 digits -- didn't change in the
+switch, only the county-code portion did), applied before both the
+`boundaries` and `tract` stages' PDB merge. `tests/test_data_integrity.py`
+guards against this class of bug recurring (or a similar one appearing
+elsewhere) by asserting no state is entirely `$0` at any level.
+
 `data/reference_values.csv` (name, dollar value -- household net-worth
 percentiles, billionaire net worths, national debt, etc.), sorted ascending
 by value, and `data/educational_content.md` (the sidebar's "About this
