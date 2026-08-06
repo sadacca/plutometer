@@ -69,6 +69,20 @@ CONTINENTAL_FIPS = {
 TRACT_SIMPLIFY_TOLERANCES = [0.005, 0.01, 0.02, 0.04]
 TRACT_FGB_MAX_MB = 80
 
+# State/county already ship as Census's coarsest "20m" cartographic
+# boundaries (1:20,000,000), so unlike tract they don't need a size-driven
+# search over multiple tolerances -- one small, fixed tolerance (~110m at
+# the equator) trims redundant vertices without visible effect at any zoom
+# level this app renders at. GEOJSON_COORDINATE_PRECISION (decimal places,
+# via GDAL's GeoJSON driver COORDINATE_PRECISION creation option) strips
+# the raw shapefile's ~15-significant-digit float precision -- sub-meter
+# accuracy is pure payload weight on a national choropleth. Both values are
+# deliberately conservative (favoring fidelity over file size) since,
+# unlike tract, state/county are small enough that aggressive shrinking
+# isn't necessary to stay git/browser-friendly.
+BOUNDARY_SIMPLIFY_TOLERANCE = 0.001
+GEOJSON_COORDINATE_PRECISION = 5
+
 # NAD83 / Conus Albers Equal Area -- centroids are computed in this projected
 # CRS (not directly on unprojected lon/lat geometry, which distorts centroids
 # for large or non-convex shapes) and converted back to EPSG:4326 for storage.
@@ -334,8 +348,10 @@ def stage_boundaries() -> None:
         if name == "state" and "STATEFP" in merged.columns:
             merged = merged.drop(columns=["STATEFP"])
 
+        merged["geometry"] = merged.geometry.simplify(BOUNDARY_SIMPLIFY_TOLERANCE, preserve_topology=True)
+
         output_path = DATA_DIR / f"{name}.geojson"
-        merged.to_file(output_path, driver="GeoJSON")
+        merged.to_file(output_path, driver="GeoJSON", COORDINATE_PRECISION=GEOJSON_COORDINATE_PRECISION)
         size_mb = output_path.stat().st_size / 1024 / 1024
         total_val = merged["total_value"].sum()
         print(f"  {name}: saved {output_path.name} ({size_mb:.1f} MB, "
@@ -441,32 +457,45 @@ def _build_adjacency(gdf: gpd.GeoDataFrame) -> dict[str, set[str]]:
     return adjacency
 
 
+def _save_adjacency(level: str, adjacency: dict[str, set[str]]) -> None:
+    avg = sum(len(v) for v in adjacency.values()) / max(len(adjacency), 1)
+    cache_path = CACHE_DIR / f"{level}_adjacency.pkl"
+    with open(cache_path, "wb") as f:
+        pickle.dump(adjacency, f)
+    size_mb = cache_path.stat().st_size / 1024 / 1024
+    print(f"  {level}: {len(adjacency)} geographies, avg {avg:.1f} neighbors, "
+          f"cached to {cache_path.name} ({size_mb:.1f} MB)")
+
+
 def stage_adjacency() -> None:
-    """Build + pickle adjacency graphs for all three levels. Requires boundaries + tract stages."""
+    """Build + pickle adjacency graphs for all three levels.
+
+    State/county are built from load_boundary()'s *raw*, full-precision geometry --
+    not read back from the simplified data/{state,county}.geojson that stage_boundaries
+    writes for rendering. Two adjacent polygons simplified independently (see
+    BOUNDARY_SIMPLIFY_TOLERANCE) can have their shared border shift by a few meters in
+    slightly different directions each; that's enough to turn an intersects() check on
+    an often many-km-long real shared border into a false negative, silently breaking
+    genuine contiguity the app's "largest contiguous region" algorithm depends on.
+    Adjacency doesn't need PDB-joined values, just GEOID + geometry, so this skips the
+    PDB merge stage_boundaries does. Requires the tract stage for tract (tract.fgb is
+    read as-is, already simplified -- unlike state/county it has no separate
+    full-precision source to fall back to).
+    """
     print("\n--- Stage: adjacency ---")
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    sources = {
-        "state": DATA_DIR / "state.geojson",
-        "county": DATA_DIR / "county.geojson",
-        "tract": DATA_DIR / "tract.fgb",
-    }
-    for level, path in sources.items():
-        if not path.exists():
-            print(f"  {level}: {path.name} not found, skipping (run the boundaries/tract stage first)")
-            continue
+    for level in ["state", "county"]:
+        print(f"  {level}: building adjacency from full-precision boundary geometry...")
+        gdf = load_boundary(level)
+        _save_adjacency(level, _build_adjacency(gdf))
 
-        print(f"  {level}: building adjacency from {path.name}...")
-        gdf = gpd.read_file(path)
-        adjacency = _build_adjacency(gdf)
-        avg = sum(len(v) for v in adjacency.values()) / max(len(adjacency), 1)
-
-        cache_path = CACHE_DIR / f"{level}_adjacency.pkl"
-        with open(cache_path, "wb") as f:
-            pickle.dump(adjacency, f)
-        size_mb = cache_path.stat().st_size / 1024 / 1024
-        print(f"  {level}: {len(adjacency)} geographies, avg {avg:.1f} neighbors, "
-              f"cached to {cache_path.name} ({size_mb:.1f} MB)")
+    tract_path = DATA_DIR / "tract.fgb"
+    if not tract_path.exists():
+        print(f"  tract: {tract_path.name} not found, skipping (run the tract stage first)")
+        return
+    print(f"  tract: building adjacency from {tract_path.name}...")
+    _save_adjacency("tract", _build_adjacency(gpd.read_file(tract_path)))
 
 
 STAGES = {

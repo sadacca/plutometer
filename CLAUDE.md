@@ -176,10 +176,29 @@ re-simplifies (tolerances `[0.005, 0.01, 0.02, 0.04]` degrees) until the
 written file is under `TRACT_FGB_MAX_MB = 80`, so nationwide tract geometry
 stays within GitHub's file-size comfort zone regardless of how it grows.
 
+**State/county boundary simplification**: `stage_boundaries` also simplifies
+state/county geometry (`BOUNDARY_SIMPLIFY_TOLERANCE = 0.001` degrees,
+`preserve_topology=True`) and writes it with GDAL's `COORDINATE_PRECISION=5`
+GeoJSON option before committing -- Census's cartographic files carry
+~15-significant-digit float precision, pure payload weight on a national
+choropleth that neither browser nor viewer can resolve. This shrank
+`state.geojson` by ~45% and `county.geojson` by ~15% with no visible effect
+at any zoom level the app renders at.
+
 **Adjacency** (queen contiguity -- edges + corners, via pairwise `STRtree`
 intersects) is precomputed for all three levels by the `adjacency` stage and
 pickled to `data/cache/*.pkl`, committed to git. The deployed app only ever
 *loads* these caches; it never rebuilds an adjacency graph at runtime.
+State/county adjacency is built from `load_boundary()`'s raw, *unsimplified*
+geometry, not from the simplified `data/{state,county}.geojson` the
+boundaries stage writes -- two adjacent polygons simplified independently
+can have their shared border shift a few meters in different directions,
+enough to turn a real intersects() (sometimes on a many-km shared border)
+into a false negative and silently break genuine contiguity. Tract adjacency
+is still built from the already-simplified `tract.fgb` (unlike state/county
+it has no cheap full-precision fallback to rebuild from) -- a known,
+pre-existing gap in the same direction, just not one this round of changes
+introduced or fixed.
 
 **Connecticut GEOID crosswalk**: in June 2022 the Census Bureau retired CT's
 8 counties (FIPS `09001`-`09015`) for 9 new planning-region county-equivalents
