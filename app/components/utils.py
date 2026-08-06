@@ -46,7 +46,13 @@ def fractional_headline(level: str, houses: float) -> str:
 
 
 def parse_value(raw: str) -> float | None:
-    """Parse a dollar amount with optional K/M/B/T shorthand (e.g. '500B', '1.5T')."""
+    """Parse a dollar amount with optional K/M/B/T shorthand (e.g. '500B', '1.5T').
+
+    Returns None only when the string doesn't match the expected format at all.
+    A well-formed but non-positive amount (e.g. '0') is returned as-is (0.0)
+    rather than folded into None, so the caller can tell "couldn't read that"
+    apart from "read it fine, but it's not a usable amount" and message accordingly.
+    """
     if not raw:
         return None
     s = raw.strip().replace("$", "").replace(",", "").strip()
@@ -56,7 +62,7 @@ def parse_value(raw: str) -> float | None:
     n = float(match.group(1))
     suffix = match.group(2).upper()
     n *= SUFFIX_MULTIPLIERS.get(suffix, 1)
-    return n if n > 0 else None
+    return n
 
 
 def fmt_dollar(value: float) -> str:
