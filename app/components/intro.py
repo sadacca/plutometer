@@ -112,11 +112,42 @@ def _end_intro() -> None:
 
 
 def _card_html(headline: str, caption: str, extra: str = "") -> str:
-    extra_html = f'<div style="margin-top:8px;">{extra}</div>' if extra else ""
+    extra_html = f'<div style="margin-top:10px;">{extra}</div>' if extra else ""
     return (
         f'<div class="pm-stat-card"><div class="pm-stat-headline">{headline}</div>'
         f'<div class="pm-stat-caption">{caption}</div>{extra_html}</div>'
     )
+
+
+def _icon_chip_html(houses: float) -> str:
+    """The house-icon row, wrapped in its own tinted chip -- a small "buys about" label
+    over the icons gives the row a reason to exist instead of just trailing off the
+    caption text, and the translucent tint (not a solid color) matches how the rest of
+    the app's accent surfaces stay readable in both light and dark themes.
+    """
+    return (
+        '<div style="background: rgba(245, 124, 0, 0.07); border-radius: 8px; '
+        'padding: 8px 10px; display: inline-block;">'
+        '<div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; '
+        f'opacity: 0.6; margin-bottom: 4px;">Buys about</div>{house_icon_row(houses)}</div>'
+    )
+
+
+def _progress_dots_html(current_idx: int, total: int) -> str:
+    """Small filled/hollow dot row standing in for "step X of Y" -- a glance-able sense
+    of place in the sequence without spelling out the numbers, current step slightly
+    larger than the rest.
+    """
+    dots = []
+    for i in range(total):
+        if i < current_idx:
+            style = "width:7px;height:7px;background:#F57C00;"
+        elif i == current_idx:
+            style = "width:9px;height:9px;background:#F57C00;"
+        else:
+            style = "width:7px;height:7px;background:rgba(245,124,0,0.28);"
+        dots.append(f'<span style="display:inline-block;border-radius:50%;margin-right:5px;{style}"></span>')
+    return f'<div style="display:flex;align-items:center;height:9px;">{"".join(dots)}</div>'
 
 
 def _local_median_home_value(store, lat: float, lon: float) -> float:
@@ -225,7 +256,7 @@ def _render_fractional_step(step: dict, value: float, houses: float, local_media
         f"Every dollar of net worth into real estate here ≈ <strong>{fmt_houses(houses)}</strong> "
         f"homes at this location's median price ({fmt_dollar(local_median)})."
     )
-    st.markdown(_card_html(headline, caption, extra=house_icon_row(houses)), unsafe_allow_html=True)
+    st.markdown(_card_html(headline, caption, extra=_icon_chip_html(houses)), unsafe_allow_html=True)
 
 
 def _render_geo_result(target_label: str, level: str, result, national_median: float) -> bool:
@@ -251,18 +282,16 @@ def _render_controls() -> None:
     step_idx = st.session_state.intro_step
     is_last = step_idx == total - 1
 
-    b1, b2, b3 = st.columns([1, 2, 1])
+    # Back/Next are the two actions someone actually taps to move through the
+    # carousel, so they get their own full-weight row. Replaying somewhere else is a
+    # secondary, come-back-to-it action -- a smaller row underneath keeps it
+    # available at every step (as asked) without competing with Back/Next for
+    # attention.
+    b1, b3 = st.columns([1, 1])
     with b1:
         if st.button("← Back", disabled=step_idx == 0, use_container_width=True, key="intro_back"):
             st.session_state.intro_step -= 1
             st.rerun()
-    with b2:
-        st.selectbox(
-            "Replay somewhere else",
-            options=list(INTRO_LOCATIONS.keys()),
-            key="intro_location",
-            label_visibility="collapsed",
-        )
     with b3:
         label = "Explore the map →" if is_last else "Next →"
         if st.button(label, use_container_width=True, key="intro_next", type="primary"):
@@ -271,6 +300,24 @@ def _render_controls() -> None:
             else:
                 st.session_state.intro_step += 1
             st.rerun()
+
+    loc_l, loc_r = st.columns([1, 3])
+    with loc_l:
+        # Plain text, no icon -- the shuffle glyph (🔀) rendered as a broken/missing-glyph
+        # box in at least one tested browser environment, and 📍 is already doing icon
+        # duty for the current location up in the header. Better to have one reliable
+        # location icon than two, one of which might not render.
+        st.markdown(
+            '<div style="padding-top: 0.55rem; font-size: 0.82rem; opacity: 0.65;">Replay in</div>',
+            unsafe_allow_html=True,
+        )
+    with loc_r:
+        st.selectbox(
+            "Replay somewhere else",
+            options=list(INTRO_LOCATIONS.keys()),
+            key="intro_location",
+            label_visibility="collapsed",
+        )
 
 
 def render_intro(store) -> None:
@@ -285,9 +332,15 @@ def render_intro(store) -> None:
 
     top_l, top_r = st.columns([3, 1])
     with top_l:
-        st.caption(f"Intro · step {step_idx + 1} of {len(STEP_IDS)} · \U0001F4CD {st.session_state.intro_location}")
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;margin:2px 0 2px 0;">'
+            f"{_progress_dots_html(step_idx, len(STEP_IDS))}"
+            f'<span style="font-size:0.82rem;opacity:0.6;">\U0001F4CD {st.session_state.intro_location}</span>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
     with top_r:
-        if st.button("Skip intro →", use_container_width=True, key="intro_skip"):
+        if st.button("Skip →", key="intro_skip"):
             _end_intro()
             st.rerun()
 
