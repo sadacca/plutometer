@@ -188,35 +188,94 @@ localStorage through a small custom component).
   wants tract-scale detail, per the tract-viewport-read design in
   `data_loader.py`.
 
-### TODO (once the above is resolved)
+### Implementation status (2026-08-10): MVP built
 
-- [ ] Build the carousel mechanism (`st.session_state.intro_step`,
-      Next/Back/Skip controls), reusing `map_view.build_map()`'s highlight
-      layer for steps that have a map-scale footprint.
-- [ ] Write the Outcome A/B framing beat (30%-of-income baseline vs. "every
-      dollar into real estate" premise) and decide whether it's a
-      standalone step or lead-in copy.
-- [ ] Build the sub-house visual (house icon / icon grid) for the
-      median-household and (in cheap markets) block steps, driven by the
-      same house-count math as `components/utils.fractional_headline()` --
-      reuse that function's phrasing rather than duplicating it.
-- [ ] Finalize the block/county anchor values (90th / 99.9th percentile
-      recommended above, or a decision to source them differently) and add
-      them wherever `reference_values.csv`-style constants live.
-- [ ] Implement the default starting location (Pittsburgh, PA) and the
-      replay picker -- start with a curated metro list (`st.selectbox`,
-      hand-maintained like `reference_values.csv`) rather than free-text
-      city autocomplete, which needs a new geocoding dataset not in the
-      pipeline today (see "Starting location & replay" above). County-name
-      dropdown is a cheap middle ground since `county.geojson` already has
-      `NAME` fields.
-- [ ] Implement the skip/bypass control, visible from step 1.
-- [ ] Decide session persistence for "seen the intro" (session-only vs.
-      durable) and implement.
-- [ ] Wire completion/skip to hand off cleanly into the existing
-      click-to-explore state (no stale `session_state` left over from intro
-      steps), landing on whichever location the intro used.
-- [ ] Manual test on a mobile viewport for layout and rerun responsiveness.
-- [ ] Add/update tests if any new non-Streamlit-framework logic is
-      extracted (e.g. a pure function computing the step target values, or
-      the housing-spend-vs-net-worth calculation for the Outcome A/B beat).
+Shipped in `app/components/intro.py`, wired into `app/app.py`, on branch
+`claude/wealth-scale-animated-intro-aa643t`. Six-step carousel, map mounted
+and visible for every step (place/visual continuity requirement -- no step
+swaps the map out for a graphic; the sub-house steps just don't attach a
+highlight layer to it):
+
+1. **Framing** -- the Outcome A/B premise, as its own step (decided: not
+   folded into lead-in copy). Copy was rewritten once already for tone --
+   see "Framing copy" below.
+2. **Median household** -- fractional/icon-row card (no map highlight,
+   marker only).
+3. **Richest on the block** (90th pct) -- same treatment.
+4. **Richest in the county** (99.9th pct, sourced live from
+   `reference_values.csv`'s own row -- $61.83M, not the $46.4M this doc
+   originally estimated from Fed DFA data; the CSV's own SCF-derived figure
+   won out as the single source of truth) -- same treatment.
+5. **A local billionaire** ($1B, `reference_values.csv`'s "'just' a
+   billionaire" row) -- **new step, added after the first build**: runs the
+   real `expand_contiguous` at *tract* level and shows an actual highlighted
+   cluster (e.g. "≈ 7 whole neighborhoods" from Pittsburgh) rather than an
+   icon row. Added because the jump from a top-0.1%-household fortune
+   (doesn't clear one tract most places) straight to an actual
+   mega-billionaire (several whole *states*) was the single biggest,
+   least-illustrated step in the original 5-step version. In the most
+   expensive replay markets (San Francisco, New York) even $1B doesn't
+   clear the starting tract -- falls back to the fractional/icon-row card
+   gracefully rather than erroring, same as the smaller tiers.
+6. **Richest in the country** -- real `expand_contiguous` at state level,
+   target value pulled from the max of `reference_values.csv`'s "Super-Rich
+   Individuals" category (currently Elon Musk) -- identical mechanism to a
+   real map click in the main app.
+
+Anchor values are read live from `reference_values.csv` by row name
+(`_ref_value()`), not duplicated as separate constants, with hardcoded
+fallback literals only in case a row name ever changes.
+
+Location: curated `INTRO_LOCATIONS` dict (13 metros), default Pittsburgh,
+PA, swappable via a `st.selectbox` at every step (not just before starting)
+-- changing it live recomputes whichever step is on screen. Free-text city
+autocomplete remains a later increment (see "Starting location & replay"
+above).
+
+Mechanism: click-driven carousel (`st.session_state.intro_step`,
+Next/Back/Skip), as decided. Timed auto-advance and a custom HTML/JS
+component remain open, deferred increments if this proves too manual.
+
+Persistence: session-only (`intro_seen` flag) -- a page refresh replays it.
+A "▶ Replay intro" button lives in the sidebar's "More options" section for
+a returning visitor.
+
+**Framing copy** was rewritten once already, mid-build, for tone -- the
+first draft ("What if every dollar went into real estate? ... deliberate
+exaggeration ... compare a household, a local fortune, and a billionaire on
+the same terms") read as a lengthy methodology footnote, not a hook.
+Current version ("What if you spent every dollar on a house?" / "The
+normal rule: ... Sensible. Forgettable." / "The question this tool
+actually asks: ...") is about a third the length and leads with the wry
+premise instead of justifying it. If it still reads slow once more people
+see it, that's the next place to cut.
+
+**Verified via a live Streamlit run + Playwright** (headless Chromium) in
+this session: all six steps render with correct copy/math at the default
+location; the billionaire step's real-tract highlight and its fallback (in
+SF/NYC) both work; Back/Next/Skip/Replay and the location swap all
+recompute correctly; hand-off into the normal click-to-explore app after
+the last step lands cleanly. Map *tiles* themselves couldn't be
+visually confirmed in this sandbox (its network policy blocks
+`cdn.jsdelivr.net`, which folium/Leaflet loads its JS from -- an
+environment limitation that would equally affect the main app's map, not a
+regression from this change); real tile rendering needs a check in an
+unrestricted environment (local dev or the actual Streamlit Cloud deploy)
+before calling this fully verified.
+
+### Remaining / not done in this pass
+
+- [ ] Confirm map tiles/basemap actually render end-to-end outside this
+      sandboxed environment.
+- [ ] Timed auto-advance or a custom HTML/JS animation, if the click-driven
+      carousel feels too manual once more people try it.
+- [ ] Free-text city/county autocomplete (curated list only for now).
+- [ ] Durable "seen the intro" persistence across a page refresh (currently
+      session-only).
+- [ ] Add/update automated tests -- `intro.py`'s helpers
+      (`_ref_value`, `_tract_render_bbox`, `_pick_country_value`) are pure
+      enough to unit test without a running Streamlit session, similar to
+      how `algorithm.py` is tested today; none were added yet.
+- [ ] First-load auto-play vs. explicit opt-in wasn't reconsidered --
+      still opens automatically for a first-time session, as originally
+      proposed.

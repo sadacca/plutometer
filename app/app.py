@@ -22,6 +22,7 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous
 from data_loader import load_store
+from components.intro import render_intro, should_show_intro, start_intro
 from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
     LEVEL_LABELS,
@@ -142,6 +143,10 @@ if not available_levels:
     st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
     st.stop()
 st.session_state.setdefault("geo_level", available_levels[0])
+
+if should_show_intro():
+    render_intro(store)
+    st.stop()
 
 
 def _stat_card_html(headline: str, caption: str) -> str:
@@ -269,6 +274,10 @@ def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float,
 
 with st.sidebar:
     st.markdown("##### ⚙️ More options")
+
+    if st.button("▶ Replay intro", use_container_width=True):
+        start_intro()
+        st.rerun()
 
     overlay_mode = st.radio(
         "Map overlay",
