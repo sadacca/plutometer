@@ -97,6 +97,33 @@ def fmt_houses(value: float) -> str:
     return f"{value:.2f}"
 
 
+def house_icon_row(houses: float, max_icons: int = 6) -> str:
+    """Small HTML row of house glyphs standing in for a house count -- one icon per whole
+    house, a faded icon for a fractional remainder, capped at max_icons with a "+N more"
+    label past that so a six-figure house count doesn't render six figures of icons.
+    Kept to a low icon cap, smaller glyph size, and an explicit nowrap flex row so the
+    "+N more" tail never wraps onto its own line regardless of card width -- a low cap
+    reads just as well as a high one here (the point is "several houses", not a precise
+    count) and avoids the wasted line a wider row risked at mobile widths.
+    """
+    whole = int(houses)
+    frac = houses - whole
+    shown_whole = min(whole, max_icons)
+    icons = "\U0001F3E0" * shown_whole
+    if frac > 0.05 and shown_whole < max_icons:
+        icons += f'<span style="opacity:{0.25 + 0.75 * frac:.2f}">\U0001F3E0</span>'
+    remainder = whole - shown_whole
+    extra = (
+        f'<span style="opacity:0.7;font-size:0.85rem;margin-left:4px;">+{fmt_num(remainder)} more</span>'
+        if remainder > 0
+        else ""
+    )
+    return (
+        '<span style="display:inline-flex;align-items:center;white-space:nowrap;">'
+        f'<span style="font-size:1.35rem;letter-spacing:1px;">{icons}</span>{extra}</span>'
+    )
+
+
 def price_color(value: float, vmin: float, vmax: float) -> str:
     """Blue (high) -> yellow (low) gradient, matching the original Leaflet overlay."""
     if vmax == vmin:

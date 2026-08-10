@@ -22,6 +22,7 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous
 from data_loader import load_store
+from components.intro import render_intro, should_show_intro, start_intro
 from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
     LEVEL_LABELS,
@@ -101,9 +102,22 @@ st.markdown(
        a single mobile screen whose whole point is showing the map *and* the
        controls below it without scrolling, that's space worth reclaiming.
        Scoped to the main column (not the sidebar) so its own spacing is
-       untouched. 4.5rem keeps a small buffer under the toolbar. */
+       untouched. 4.5rem keeps a small buffer under the toolbar.
+
+       max-width + auto margins keep the same column comfortably narrow on a wide
+       desktop monitor instead of stretching edge-to-edge -- layout="wide" sizes
+       the main column to fill whatever space the (collapsed-by-default) sidebar
+       leaves, which on a large screen means multi-hundred-character-wide text
+       lines, a map squashed into a short wide letterbox, and buttons (Back/Next,
+       the intro's controls) spread far enough apart to stop reading as one
+       control group. Below 760px this simply has no effect -- the container is
+       already narrower than the cap, same as before this rule existed -- so
+       mobile is untouched. */
     [data-testid="stMainBlockContainer"] {
       padding-top: 4.5rem;
+      max-width: 760px;
+      margin-left: auto;
+      margin-right: auto;
     }
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
       gap: 0.5rem;
@@ -142,6 +156,10 @@ if not available_levels:
     st.error("No geography data found. Run `python scripts/prepare_data.py` first.")
     st.stop()
 st.session_state.setdefault("geo_level", available_levels[0])
+
+if should_show_intro():
+    render_intro(store)
+    st.stop()
 
 
 def _stat_card_html(headline: str, caption: str) -> str:
@@ -269,6 +287,10 @@ def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float,
 
 with st.sidebar:
     st.markdown("##### ⚙️ More options")
+
+    if st.button("▶ Replay intro", use_container_width=True):
+        start_intro()
+        st.rerun()
 
     overlay_mode = st.radio(
         "Map overlay",
@@ -445,7 +467,14 @@ map_data = st_folium(
 # columns -- auto-stacks to full width on narrow viewports -- to keep this
 # section as short as the result line above the map.
 
-c1, c2, c3 = st.columns(3)
+# Uneven thirds, not equal -- the middle column stacks two selects (Wealth Category,
+# then Amount) whose option text runs much longer than Geography Level's or the
+# Custom amount input's placeholder (e.g. "Elon Musk Net Worth ($726.0B)", or longer
+# still for some reference_values.csv rows), so it needs more room to avoid the
+# selected value getting cut off mid-number -- most visible now that the main
+# column itself is capped to a comfortable desktop width (see the max-width rule
+# above) instead of stretching to fill however wide the browser window is.
+c1, c2, c3 = st.columns([1, 1.5, 1])
 with c1:
     geo_level = st.selectbox(
         "Geography Level",
