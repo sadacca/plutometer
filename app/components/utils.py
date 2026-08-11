@@ -36,23 +36,18 @@ PARTIAL_FILL_OPACITY_CAP = 0.45
 # selection even in overlay modes/zoom levels where the opacity difference is subtle.
 PARTIAL_DASH_ARRAY = "6, 4"
 
-# One dot per house, not one shape whose size encodes the count -- literal individual
-# units read as more concrete than an abstract growing circle, and it's what keeps a
-# single house from ballooning past the click marker itself (radius 7px, see
-# map_view._add_marker) into something that reads as "a lot" for just one house. Sized
-# to just ring that marker, not dwarf it. All sizes below are a baseline tuned for
-# PARTIAL_DOT_REF_ZOOM -- see partial_dot_zoom_scale for why they can't just be fixed
-# pixel constants the way the click marker's own halo is.
+# One dot per house, always, no cap -- literal individual units read as more concrete
+# than an abstract growing circle, and "one dot might stand for 2+ houses" (an earlier
+# version capped the drawn count and let the ring alone keep growing past it) undermines
+# that the moment someone notices the count doesn't match. Sized to just ring the click
+# marker itself (radius 7px, see map_view._add_marker), not dwarf it. All sizes below
+# are a baseline tuned for PARTIAL_DOT_REF_ZOOM -- see partial_dot_zoom_scale for why
+# they can't just be fixed pixel constants the way the click marker's own halo is.
 PARTIAL_DOT_DIAMETER_PX = 14
-PARTIAL_DOT_CLUSTER_CAP = 6  # dots stop multiplying past this -- exact count is already
-                              # in the result text, this only needs to read as "several"
-PARTIAL_DOT_RING_BASE_PX = 11  # ring radius at the 2nd house (1 sibling around the anchor)
-PARTIAL_DOT_RING_STEP_PX = 5  # ring radius added per additional house, up to the cluster
-                                # cap -- linear, not damped, so 2 vs. 3 vs. 4 houses are
-                                # actually distinguishable instead of nearly identical
-PARTIAL_DOT_RING_EXTRA_PX = 20  # further (sqrt-damped) ring growth from the cap's house
-                                  # count up to FEW_HOUSES_MAX, so the cluster keeps
-                                  # growing even once the dot count itself stops
+# Packing radius (in dot-diameters) for n dots arranged in the sunflower/Vogel spiral
+# partial_dot_positions builds -- tuned so same-size dots tile without overlapping,
+# however many there are.
+PARTIAL_DOT_PACK_FACTOR = 0.62
 PARTIAL_DOT_OPACITY_FLOOR = 0.3
 PARTIAL_DOT_OPACITY_FULL = 0.85
 
@@ -63,11 +58,12 @@ PARTIAL_DOT_OPACITY_FULL = 0.85
 # (see app.py's auto-cascade), so it's the zoom the sizes above are tuned for; scaling
 # by 2x per zoom level away from it matches how Web Mercator itself halves
 # degrees-per-pixel per +1 zoom, so the cluster tracks the geography's own on-screen
-# size instead of staying fixed. Clamped so it never disappears (zoomed way out) or
-# balloons (zoomed way in).
+# size instead of staying fixed. Deliberately *not* floored on the low end -- a floor
+# reintroduces the exact "looks huge once zoomed out past it" bug this exists to fix,
+# just at whatever zoom the floor kicks in instead of at PARTIAL_DOT_REF_ZOOM. Only
+# capped on the high end, to keep zooming in from blowing the cluster up indefinitely.
 PARTIAL_DOT_REF_ZOOM = TRACT_MIN_ZOOM
-PARTIAL_DOT_MIN_SCALE = 0.3
-PARTIAL_DOT_MAX_SCALE = 1.6
+PARTIAL_DOT_MAX_SCALE = 2.5
 
 
 def partial_fill_opacity(fraction: float) -> float:
@@ -80,32 +76,31 @@ def partial_fill_opacity(fraction: float) -> float:
 def partial_dot_zoom_scale(zoom: int) -> float:
     """Screen-size multiplier for the partial-match dot cluster at the given zoom,
     relative to its PARTIAL_DOT_REF_ZOOM-tuned baseline size -- see that constant's
-    comment for why this needs to exist at all.
+    comment for why this needs to exist, and why it's unclamped below PARTIAL_DOT_REF_ZOOM.
     """
-    return max(PARTIAL_DOT_MIN_SCALE, min(PARTIAL_DOT_MAX_SCALE, 2 ** (zoom - PARTIAL_DOT_REF_ZOOM)))
+    return min(PARTIAL_DOT_MAX_SCALE, 2 ** (zoom - PARTIAL_DOT_REF_ZOOM))
 
 
 def partial_dot_positions(houses: float) -> list[tuple[float, float]]:
-    """Baseline (pre zoom-scale) pixel (dx, dy) offsets from the marker for each
-    individual "house" dot, houses >= 1. One dot always sits exactly on the click point
-    (a single house just barely rings that point); each additional house up to
-    PARTIAL_DOT_CLUSTER_CAP adds one more small dot around it, spaced linearly so low
-    counts are visually distinguishable. Past the cap, the ring keeps growing (more
-    gently) with the *actual* house count up to FEW_HOUSES_MAX even though the dot count
-    itself has stopped, so the cluster doesn't visually freeze for that whole range.
+    """Baseline (pre zoom-scale) pixel (dx, dy) offsets for exactly round(houses) dots
+    (capped only by FEW_HOUSES_MAX, the tier boundary this is never called past -- see
+    map_view.build_map), one per house. A single house sits exactly on the click point;
+    for more than one, dots are packed via a sunflower/Vogel spiral (even density, no
+    overlap, no preferred direction) whose radius grows with sqrt(n) -- the same
+    relationship a real evenly-packed cluster of n same-size items has, so the *whole*
+    cluster's footprint scales legibly with house count instead of freezing once some
+    fixed dot-count cap is hit.
     """
-    n = max(1, min(round(houses), PARTIAL_DOT_CLUSTER_CAP))
-    positions = [(0.0, 0.0)]
-    siblings = n - 1
-    if siblings > 0:
-        ring_r = PARTIAL_DOT_RING_BASE_PX + PARTIAL_DOT_RING_STEP_PX * (siblings - 1)
-        if houses > PARTIAL_DOT_CLUSTER_CAP:
-            span = max(FEW_HOUSES_MAX - PARTIAL_DOT_CLUSTER_CAP, 1)
-            t = min(houses, FEW_HOUSES_MAX) - PARTIAL_DOT_CLUSTER_CAP
-            ring_r += PARTIAL_DOT_RING_EXTRA_PX * (t / span) ** 0.5
-        for i in range(siblings):
-            angle = 2 * math.pi * i / siblings
-            positions.append((ring_r * math.cos(angle), ring_r * math.sin(angle)))
+    n = max(1, min(round(houses), FEW_HOUSES_MAX))
+    if n == 1:
+        return [(0.0, 0.0)]
+    golden_angle = math.pi * (3 - math.sqrt(5))
+    pack_radius = PARTIAL_DOT_PACK_FACTOR * PARTIAL_DOT_DIAMETER_PX * math.sqrt(n)
+    positions = []
+    for i in range(n):
+        r = pack_radius * math.sqrt((i + 0.5) / n)
+        theta = i * golden_angle
+        positions.append((r * math.cos(theta), r * math.sin(theta)))
     return positions
 
 
