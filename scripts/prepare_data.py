@@ -65,9 +65,19 @@ CONTINENTAL_FIPS = {
 }
 
 # Simplification tolerances (degrees) tried in order for the tract geometry
-# file until the written FlatGeobuf is under TRACT_FGB_MAX_MB.
-TRACT_SIMPLIFY_TOLERANCES = [0.005, 0.01, 0.02, 0.04]
-TRACT_FGB_MAX_MB = 80
+# file until the written FlatGeobuf is under TRACT_FGB_MAX_MB. The previous
+# finest tolerance tried (0.005) was also the *first* one tried, and it wrote
+# a 26MB file -- less than a third of the 80MB budget -- so the pipeline was
+# never actually exercising the size cap at all; it just stopped at the
+# coarsest geometry in the list regardless of how much headroom was left.
+# That's what made tract boundaries on the map (especially zoomed-in, e.g.
+# the intro carousel's billionaire step) look like abstract shapes rather
+# than recognizable neighborhoods. Starting the search much finer (down to
+# 0.0005 degrees, ~50m at the equator -- comparable to the fine tolerance
+# state/county boundaries already use) and raising the cap lets the pipeline
+# actually spend the size budget on resolution instead of leaving it unused.
+TRACT_SIMPLIFY_TOLERANCES = [0.0005, 0.001, 0.002, 0.003, 0.005, 0.01, 0.02, 0.04]
+TRACT_FGB_MAX_MB = 120
 
 # State/county already ship as Census's coarsest "20m" cartographic
 # boundaries (1:20,000,000), so unlike tract they don't need a size-driven

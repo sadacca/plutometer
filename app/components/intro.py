@@ -70,25 +70,35 @@ STEP_ZOOM = {"framing": 12, "median": 15, "block": 14, "county": 12, "billionair
 
 # Curated replay list rather than free-text city search -- the app has no
 # name-to-location index today (see feature-requests.md); this is the cheap
-# version of "replay somewhere else." Pittsburgh is the default: a legible,
+# version of "replay somewhere else." Kansas City is the default: a legible,
 # mid-size, non-coastal metro that doesn't read oddly against a *national*
 # median figure the way one of the most expensive markets would.
+#
+# Coordinates point at a primarily-residential neighborhood within each city
+# rather than its downtown/urban core -- a downtown centroid tends to land on
+# commercial, institutional, or high-rise-mixed-use tracts whose "median home
+# price" doesn't represent how most residents actually live, which reads
+# oddly on a tool about *residential* real estate. These are best-effort
+# picks of well-known, primarily single-family/low-rise residential
+# neighborhoods (no parcel-level land-use dataset is loaded to compute this
+# precisely) -- close enough to the urban core to stay inside the city's own
+# tract/county data, not an exurb.
 INTRO_LOCATIONS = {
-    "Pittsburgh, PA": (40.4406, -79.9959),
-    "Cleveland, OH": (41.4993, -81.6944),
-    "Kansas City, MO": (39.0997, -94.5786),
-    "Columbus, OH": (39.9612, -82.9988),
-    "Atlanta, GA": (33.7490, -84.3880),
-    "Denver, CO": (39.7392, -104.9903),
-    "Austin, TX": (30.2672, -97.7431),
-    "Seattle, WA": (47.6062, -122.3321),
-    "Boston, MA": (42.3601, -71.0589),
-    "San Francisco, CA": (37.7749, -122.4194),
-    "New York, NY": (40.7128, -74.0060),
-    "Los Angeles, CA": (34.0522, -118.2437),
-    "Miami, FL": (25.7617, -80.1918),
+    "Kansas City, MO": (39.0175, -94.6013),  # Waldo
+    "Pittsburgh, PA": (40.4386, -79.9226),  # Squirrel Hill
+    "Cleveland, OH": (41.4406, -81.7183),  # Old Brooklyn
+    "Columbus, OH": (40.0464, -83.0135),  # Clintonville
+    "Atlanta, GA": (33.7799, -84.3555),  # Virginia-Highland
+    "Denver, CO": (39.6983, -104.9628),  # Washington Park
+    "Austin, TX": (30.2637, -97.7728),  # Zilker
+    "Seattle, WA": (47.6615, -122.3343),  # Wallingford
+    "Boston, MA": (42.3097, -71.1151),  # Jamaica Plain
+    "San Francisco, CA": (37.7599, -122.4869),  # Outer Sunset
+    "New York, NY": (40.7196, -73.8448),  # Forest Hills, Queens
+    "Los Angeles, CA": (34.1397, -118.2151),  # Eagle Rock
+    "Miami, FL": (25.7489, -80.2201),  # The Roads
 }
-DEFAULT_INTRO_LOCATION = "Pittsburgh, PA"
+DEFAULT_INTRO_LOCATION = "Kansas City, MO"
 
 
 def should_show_intro() -> bool:
@@ -277,30 +287,40 @@ def _render_geo_result(target_label: str, level: str, result, national_median: f
     return True
 
 
-def _render_controls() -> None:
+def _render_nav_row() -> tuple[bool, bool, bool]:
+    """Back / Next / Skip, left to right, in one row above the map -- on a short mobile
+    viewport the map plus a step's content card can push a nav row placed *below* the
+    map off-screen entirely, so the controls someone actually needs to move through the
+    carousel live up top instead, alongside Skip.
+
+    Returns the three buttons' clicked state rather than acting on a click immediately:
+    every widget this function (and the location picker further down the page) draws
+    must actually render in the current script run before any `st.rerun()` fires, or
+    Streamlit forgets that widget's session-state value across the rerun (a widget not
+    instantiated in a run doesn't have its key's state preserved). Acting on the click
+    here -- before the location selectbox below the map has had a chance to draw --
+    was exactly what caused a replay location picked on one step to silently reset back
+    to the default on the next.
+    """
     total = len(STEP_IDS)
     step_idx = st.session_state.intro_step
     is_last = step_idx == total - 1
 
-    # Back/Next are the two actions someone actually taps to move through the
-    # carousel, so they get their own full-weight row. Replaying somewhere else is a
-    # secondary, come-back-to-it action -- a smaller row underneath keeps it
-    # available at every step (as asked) without competing with Back/Next for
-    # attention.
-    b1, b3 = st.columns([1, 1])
-    with b1:
-        if st.button("← Back", disabled=step_idx == 0, use_container_width=True, key="intro_back"):
-            st.session_state.intro_step -= 1
-            st.rerun()
-    with b3:
-        label = "Explore the map →" if is_last else "Next →"
-        if st.button(label, use_container_width=True, key="intro_next", type="primary"):
-            if is_last:
-                _end_intro()
-            else:
-                st.session_state.intro_step += 1
-            st.rerun()
+    nav_l, nav_m, nav_r = st.columns([1, 1, 1])
+    with nav_l:
+        back_clicked = st.button("← Back", disabled=step_idx == 0, use_container_width=True, key="intro_back")
+    with nav_m:
+        next_label = "Explore the map →" if is_last else "Next →"
+        next_clicked = st.button(next_label, use_container_width=True, key="intro_next", type="primary")
+    with nav_r:
+        skip_clicked = st.button("Skip →", use_container_width=True, key="intro_skip")
+    return back_clicked, next_clicked, skip_clicked
 
+
+def _render_location_picker() -> None:
+    """The "replay somewhere else" selectbox -- secondary, come-back-to-it control, so
+    it stays below the map rather than competing with Back/Next/Skip for top-row space.
+    """
     loc_l, loc_r = st.columns([1, 3])
     with loc_l:
         # Plain text, no icon -- the shuffle glyph (🔀) rendered as a broken/missing-glyph
@@ -326,23 +346,19 @@ def render_intro(store) -> None:
 
     step_idx = st.session_state.intro_step
     step_id = STEP_IDS[step_idx]
+    is_last = step_idx == len(STEP_IDS) - 1
     lat, lon = INTRO_LOCATIONS[st.session_state.intro_location]
 
     st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
-    top_l, top_r = st.columns([3, 1])
-    with top_l:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;margin:2px 0 2px 0;">'
-            f"{_progress_dots_html(step_idx, len(STEP_IDS))}"
-            f'<span style="font-size:0.82rem;opacity:0.6;">\U0001F4CD {st.session_state.intro_location}</span>'
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-    with top_r:
-        if st.button("Skip →", key="intro_skip"):
-            _end_intro()
-            st.rerun()
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:10px;margin:2px 0 6px 0;">'
+        f"{_progress_dots_html(step_idx, len(STEP_IDS))}"
+        f'<span style="font-size:0.82rem;opacity:0.6;">\U0001F4CD {st.session_state.intro_location}</span>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    back_clicked, next_clicked, skip_clicked = _render_nav_row()
 
     render_gdf = None
     selected_geoids = None
@@ -404,4 +420,19 @@ def render_intro(store) -> None:
     )
     st_folium(fmap, height=420, use_container_width=True, returned_objects=[], key="plutometer_intro_map")
 
-    _render_controls()
+    _render_location_picker()
+
+    # Acted on only now, after every widget in this render -- including the location
+    # picker above -- has been drawn; see _render_nav_row's docstring for why.
+    if back_clicked:
+        st.session_state.intro_step -= 1
+        st.rerun()
+    elif next_clicked:
+        if is_last:
+            _end_intro()
+        else:
+            st.session_state.intro_step += 1
+        st.rerun()
+    elif skip_clicked:
+        _end_intro()
+        st.rerun()
