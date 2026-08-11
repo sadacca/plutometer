@@ -1,6 +1,6 @@
 # How Rich Are the Rich, Really?
 
-Big numbers are hard to feel. A hundreds of billions of dollars sounds like a lot, but how much is it *really*?
+Big numbers are hard to feel. Hundreds of billions of dollars sounds like a lot, but how much is it *really*?
 
 This tool answers that question by mapping wealth onto real neighborhoods. Pick a dollar amount, click anywhere on the map, and see the contiguous area whose total home values add up to that figure.
 
