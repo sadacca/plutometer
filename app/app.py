@@ -131,11 +131,13 @@ st.markdown(
        scrolling *and* stuck in a narrow centered column with wide empty margins
        on either side once the viewport is wider than a tablet. At >=992px,
        reflow the same three blocks -- unchanged Python/DOM order, so mobile is
-       untouched -- into one row via flexbox `order`: info card left, map
-       center (grows to soak up the freed-up side margins), controls right.
-       That fills the dead space *and* means the whole click-to-see-result loop
-       fits one screen height without scrolling, instead of a 3x-page-height
-       stack.
+       untouched -- into a 2-column CSS grid: info card and controls stacked in
+       a left column (controls right under the info they describe, instead of
+       squeezed into their own third column with dead space below whichever of
+       the two ends up shorter), map filling a large right column spanning both
+       rows. That fills the dead space *and* means the whole click-to-see-result
+       loop fits one screen height without scrolling, instead of a
+       3x-page-height stack.
 
        Each block is wrapped in st.container(key=...) (app.py) purely so it
        gets a stable `.st-key-<key>` class to target here -- Streamlit assigns
@@ -145,71 +147,61 @@ st.markdown(
        :has() to find the shared *ancestor* (rather than assuming a fixed
        nesting depth from the main block container down to it) keeps this
        working even if Streamlit adds/removes a wrapper level elsewhere in the
-       tree between here and there. */
+       tree between here and there.
+
+       Grid over flexbox specifically because info+controls need to *stack in
+       a shared column* while map sits beside both -- flexbox's single axis
+       can put three siblings in a row or reorder them, but can't put two of
+       them in one column and the third spanning beside it without actually
+       nesting them in the DOM, which st.container()'s Python-side API doesn't
+       make convenient here. Grid areas place each of the three siblings by
+       row/column index instead, so no DOM nesting is needed. It also sidesteps
+       a width-vs-flex-basis fight Chromium resolved in width's favor when this
+       was flexbox (Streamlit's own wrapper div ships a `width: 100%` rule) --
+       in a grid, an item's `width` percentage resolves against its own grid
+       area, not the whole grid, so it just naturally matches. */
     @media (min-width: 992px) {
       [data-testid="stMainBlockContainer"] {
         max-width: 1500px;
       }
       [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) {
-        /* stVerticalBlock ships its own `flex-direction: column` (it's a
-           *vertical* block, by design/name) that otherwise silently wins
-           here since this rule would never otherwise declare flex-direction
-           at all -- not a specificity fight, just an undeclared property
-           falling through to their rule. Row is what actually reflows info/
-           map/controls side by side. */
-        display: flex;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 1rem;
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        grid-template-rows: auto auto;
+        column-gap: 1.5rem;
+        row-gap: 0.5rem;
+        align-items: start;
       }
-      /* This flex row's other direct children besides the three named blocks
-         below -- e.g. the element-container holding this very <style> tag's
-         own st.markdown call -- default to full row width (see next comment)
-         same as the named blocks do, which is enough to single-handedly fill
-         the row and force everything else onto its own line. Shrink anything
-         un-named back down to its content size first; the named-block rules
-         below win the cascade over this (an extra :has() each, so strictly
-         more specific) regardless of source order. */
-      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div {
-        flex: 0 0 auto;
-        width: auto !important;
-        max-width: none !important;
+      /* This grid's other direct children besides the three named blocks below
+         -- e.g. the element-container holding this very <style> tag's own
+         st.markdown call -- would otherwise auto-place into the grid (as an
+         extra implicit cell, or overlapping row 1 col 1) and disturb sizing.
+         `display: contents` removes an element from grid-item participation
+         entirely while leaving its own children (here, none -- a <style> tag
+         renders nothing) unaffected, so the <style> tag's effect is untouched. */
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:not(:has(.st-key-pm-info)):not(:has(.st-key-pm-map)):not(:has(.st-key-pm-controls)) {
+        display: contents;
       }
-      /* Streamlit's own wrapper div around every block (data-testid
-         "stLayoutWrapper" -- this is what `> div` below actually matches)
-         ships a same-specificity `width: 100%; max-width: 100%` rule of its
-         own, which wins the flex-basis-vs-width tug-of-war in Chromium and
-         renders every item full-width regardless of the flex-basis set here
-         -- so width/max-width need their own explicit (!important) values
-         alongside flex-basis, not flex-basis alone. */
       [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-info) {
-        order: 1;
-        flex: 0 0 240px;
-        width: 240px !important;
-        max-width: 240px !important;
-      }
-      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-map) {
-        order: 2;
-        flex: 1 1 320px;
-        width: auto !important;
-        max-width: none !important;
-        min-width: 0; /* let the map shrink below its content's natural width if the row gets tight */
+        grid-column: 1;
+        grid-row: 1;
       }
       [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-controls) {
-        order: 3;
-        flex: 0 0 240px;
-        width: 240px !important;
-        max-width: 240px !important;
+        grid-column: 1;
+        grid-row: 2;
+      }
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-map) {
+        grid-column: 2;
+        grid-row: 1 / span 2;
       }
       /* The Geography Level / Wealth Category+Amount / Custom amount trio
          (app.py's c1/c2/c3) is an st.columns() row sized for a ~700px-wide
-         mobile column, not this ~240px sidebar -- Streamlit's own responsive
-         column-stacking only kicks in noticeably narrower than that, so left
-         alone here it renders as three ~80px slivers with badly wrapping
-         labels ("Geogra- phy Level"). Force that row to stack vertically
-         instead, same as it already would on an actually-narrow phone
-         screen. */
+         mobile column, not this ~340px left-column cell -- Streamlit's own
+         responsive column-stacking only kicks in noticeably narrower than
+         that, so left alone here it renders as three ~110px slivers with
+         badly wrapping labels ("Geogra- phy Level"). Force that row to stack
+         vertically instead, same as it already would on an actually-narrow
+         phone screen. */
       .st-key-pm-controls [data-testid="stHorizontalBlock"] {
         flex-direction: column !important;
       }
