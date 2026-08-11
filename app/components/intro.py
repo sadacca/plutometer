@@ -1,10 +1,12 @@
 """
 Skippable animated intro carousel -- "how rich are the rich, really?" walked
 through as a fixed sequence instead of a cold click-to-explore map, for a
-visitor who wouldn't otherwise know what to click. See feature-requests.md
-for the design discussion this implements (mechanism, anchor values, and
-the deferred items -- timed auto-advance, free-text location search -- this
-first pass doesn't attempt).
+visitor who wouldn't otherwise know what to click. Opt-in, not the default
+first-load experience: a "Take the tour" button in the sidebar (see app.py)
+starts it via start_intro(); should_show_intro() no longer auto-triggers it
+on a fresh session. See feature-requests.md for the design discussion this
+implements (mechanism, anchor values, and the deferred items -- timed
+auto-advance, free-text location search -- this first pass doesn't attempt).
 
 The map stays mounted and in the same page position through every step
 (place/visual continuity was an explicit requirement) rather than being
@@ -161,12 +163,12 @@ DEFAULT_INTRO_LOCATION = "Omaha, NE"
 
 
 def should_show_intro() -> bool:
-    """True on a visitor's first script run this session, or after they hit Replay --
-    session-only (Streamlit has no durable per-visitor storage), so a page refresh
-    shows it again. That's an accepted trade-off, not a bug -- see feature-requests.md.
+    """True only once a visitor has explicitly opened the tour from the sidebar (see
+    start_intro) -- it no longer auto-plays on page load. Session-only (Streamlit has
+    no durable per-visitor storage), so intro_active always starts False on a fresh
+    session/page refresh, same as every other widget-backed session_state default here.
     """
-    st.session_state.setdefault("intro_seen", False)
-    st.session_state.setdefault("intro_active", not st.session_state.intro_seen)
+    st.session_state.setdefault("intro_active", False)
     return st.session_state.intro_active
 
 
@@ -177,7 +179,6 @@ def start_intro() -> None:
 
 def _end_intro() -> None:
     st.session_state.intro_active = False
-    st.session_state.intro_seen = True
 
 
 def _card_html(headline: str, caption: str, extra: str = "") -> str:

@@ -5,11 +5,14 @@ Streamlit entrypoint. Click a spot on the map, pick a dollar amount, and see
 the largest contiguous set of geographies (states / counties / neighborhoods)
 whose combined residential real-estate value doesn't exceed it.
 
-Mobile-first layout: the sidebar is collapsed by default and holds only
-secondary settings (overlay mode, clear button, detail expanders). The
-header, the map, the core controls (geography level, target value), and the
-primary "how many houses" result all live in the main column, map first, so
-the whole click-to-see-result loop never requires opening the sidebar.
+Mobile-first layout: the header, the map, the core controls (geography
+level, target value), and the primary "how many houses" result all live in
+the main column, map first, so the whole click-to-see-result loop never
+*requires* opening the sidebar. The sidebar itself is open by default
+(secondary settings -- overlay mode, clear button, detail expanders -- plus
+the "Take the tour" entry point for the opt-in intro carousel, see
+components/intro.py) so that entry point stays discoverable on first load
+without forcing every visitor through the carousel itself.
 """
 
 import sys
@@ -41,7 +44,7 @@ st.set_page_config(
     page_title="How rich are the rich, really?",
     page_icon="\U0001F3E0",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # Translucent accent tints (not solid colors) so these read correctly against
@@ -106,8 +109,8 @@ st.markdown(
 
        max-width + auto margins keep the same column comfortably narrow on a wide
        desktop monitor instead of stretching edge-to-edge -- layout="wide" sizes
-       the main column to fill whatever space the (collapsed-by-default) sidebar
-       leaves, which on a large screen means multi-hundred-character-wide text
+       the main column to fill whatever space the sidebar (open by default, but
+       collapsible) leaves, which on a large screen means multi-hundred-character-wide text
        lines, a map squashed into a short wide letterbox, and buttons (Back/Next,
        the intro's controls) spread far enough apart to stop reading as one
        control group. Below 760px this simply has no effect -- the container is
@@ -280,17 +283,20 @@ def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float,
 
 
 # ---------------------------------------------------------------- sidebar: secondary --
-# Collapsed by default (see set_page_config). The core loop -- header, map,
-# level/amount controls, and the primary result -- all lives in the main
-# column below, so the sidebar is only needed for the overlay toggle or to
-# dig into secondary detail.
+# Expanded by default (see set_page_config) specifically so the tour entry point below
+# is visible without hunting for it -- the intro carousel itself no longer auto-plays
+# (see components/intro.py's should_show_intro), so this button is now the *only* way
+# to reach it. The rest of the sidebar's core loop -- header, map, level/amount
+# controls, and the primary result -- still all lives in the main column below; this
+# panel stays optional for anyone who dismisses it.
 
 with st.sidebar:
     st.markdown("##### ⚙️ More options")
 
-    if st.button("▶ Replay intro", use_container_width=True):
+    if st.button("▶ Take the tour", use_container_width=True, type="primary"):
         start_intro()
         st.rerun()
+    st.caption("A short guided walkthrough of what this tool shows.")
 
     overlay_mode = st.radio(
         "Map overlay",
