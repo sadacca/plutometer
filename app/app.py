@@ -125,6 +125,100 @@ st.markdown(
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
       gap: 0.5rem;
     }
+
+    /* Desktop: the mobile-first stack (info card, then map, then controls, each
+       full-width) leaves the map both too tall to fit a normal window without
+       scrolling *and* stuck in a narrow centered column with wide empty margins
+       on either side once the viewport is wider than a tablet. At >=992px,
+       reflow the same three blocks -- unchanged Python/DOM order, so mobile is
+       untouched -- into one row via flexbox `order`: info card left, map
+       center (grows to soak up the freed-up side margins), controls right.
+       That fills the dead space *and* means the whole click-to-see-result loop
+       fits one screen height without scrolling, instead of a 3x-page-height
+       stack.
+
+       Each block is wrapped in st.container(key=...) (app.py) purely so it
+       gets a stable `.st-key-<key>` class to target here -- Streamlit assigns
+       that class to the container's own `stVerticalBlock` element, which
+       always sits exactly one element-container wrapper div below its parent
+       block, hence the `> div > .st-key-*` child-combinator depth below. Using
+       :has() to find the shared *ancestor* (rather than assuming a fixed
+       nesting depth from the main block container down to it) keeps this
+       working even if Streamlit adds/removes a wrapper level elsewhere in the
+       tree between here and there. */
+    @media (min-width: 992px) {
+      [data-testid="stMainBlockContainer"] {
+        max-width: 1500px;
+      }
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) {
+        /* stVerticalBlock ships its own `flex-direction: column` (it's a
+           *vertical* block, by design/name) that otherwise silently wins
+           here since this rule would never otherwise declare flex-direction
+           at all -- not a specificity fight, just an undeclared property
+           falling through to their rule. Row is what actually reflows info/
+           map/controls side by side. */
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      /* This flex row's other direct children besides the three named blocks
+         below -- e.g. the element-container holding this very <style> tag's
+         own st.markdown call -- default to full row width (see next comment)
+         same as the named blocks do, which is enough to single-handedly fill
+         the row and force everything else onto its own line. Shrink anything
+         un-named back down to its content size first; the named-block rules
+         below win the cascade over this (an extra :has() each, so strictly
+         more specific) regardless of source order. */
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div {
+        flex: 0 0 auto;
+        width: auto !important;
+        max-width: none !important;
+      }
+      /* Streamlit's own wrapper div around every block (data-testid
+         "stLayoutWrapper" -- this is what `> div` below actually matches)
+         ships a same-specificity `width: 100%; max-width: 100%` rule of its
+         own, which wins the flex-basis-vs-width tug-of-war in Chromium and
+         renders every item full-width regardless of the flex-basis set here
+         -- so width/max-width need their own explicit (!important) values
+         alongside flex-basis, not flex-basis alone. */
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-info) {
+        order: 1;
+        flex: 0 0 240px;
+        width: 240px !important;
+        max-width: 240px !important;
+      }
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-map) {
+        order: 2;
+        flex: 1 1 320px;
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0; /* let the map shrink below its content's natural width if the row gets tight */
+      }
+      [data-testid="stVerticalBlock"]:has(> div > .st-key-pm-info) > div:has(> .st-key-pm-controls) {
+        order: 3;
+        flex: 0 0 240px;
+        width: 240px !important;
+        max-width: 240px !important;
+      }
+      /* The Geography Level / Wealth Category+Amount / Custom amount trio
+         (app.py's c1/c2/c3) is an st.columns() row sized for a ~700px-wide
+         mobile column, not this ~240px sidebar -- Streamlit's own responsive
+         column-stacking only kicks in noticeably narrower than that, so left
+         alone here it renders as three ~80px slivers with badly wrapping
+         labels ("Geogra- phy Level"). Force that row to stack vertically
+         instead, same as it already would on an actually-narrow phone
+         screen. */
+      .st-key-pm-controls [data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+      }
+      .st-key-pm-controls [data-testid="stHorizontalBlock"] > div {
+        width: 100% !important;
+        max-width: none !important;
+        flex: 1 1 auto !important;
+      }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -351,121 +445,130 @@ with st.sidebar:
 # numbers, or a headline that shows the resulting area's value without ever
 # saying what it was being measured against.
 
-st.markdown("##### \U0001F3E0 How rich are the rich, really?")
+# Wrapped in a keyed container purely so the desktop media query above can
+# target it by its `.st-key-pm-info` class -- see that CSS block for why.
+with st.container(key="pm-info"):
+    st.markdown("##### \U0001F3E0 How rich are the rich, really?")
 
-result = st.session_state.result
-target_label = st.session_state.result_target_label
-if result is not None and result.num_selected > 0:
-    label = geo_label(st.session_state.result_level, result.num_selected)
-    headline = f"{target_label} ≈ {fmt_num(result.num_selected)} {label}"
-    caption = (
-        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
-        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
-        f" ({fmt_dollar(st.session_state.result_national_median)})"
-    )
-    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
-elif result is not None and result.area_median_home_value > 0:
-    # Target undercuts even the single smallest geography at the finest level
-    # reached (num_selected == 0) -- expand_contiguous still returns that
-    # geography's own median home value in this case (see its start_val >
-    # target_value short-circuit), so "how many houses could this buy" still
-    # has a real, if fractional, answer instead of a dead-end message.
-    # fractional_headline tiers the wording by actual house count -- a flat
-    # "smaller than a whole neighborhood" reads the same whether the money
-    # buys 3 houses or 300, since a tract can hold hundreds to thousands.
-    # Still led by target_label so this stays consistent with the
-    # num_selected > 0 branch above -- the reader always sees what dollar
-    # figure produced the result, not just what it bought.
-    headline = f"{target_label}: {fractional_headline(st.session_state.result_level, result.median_houses_to_target)}"
-    caption = (
-        f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
-        f" ({fmt_dollar(result.area_median_home_value)})"
-        f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
-        f" ({fmt_dollar(st.session_state.result_national_median)})"
-    )
-    st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
-else:
-    st.markdown(f'<div class="pm-empty-banner">{st.session_state.status}</div>', unsafe_allow_html=True)
+    result = st.session_state.result
+    target_label = st.session_state.result_target_label
+    if result is not None and result.num_selected > 0:
+        label = geo_label(st.session_state.result_level, result.num_selected)
+        headline = f"{target_label} ≈ {fmt_num(result.num_selected)} {label}"
+        caption = (
+            f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
+            f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
+            f" ({fmt_dollar(st.session_state.result_national_median)})"
+        )
+        st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
+    elif result is not None and result.area_median_home_value > 0:
+        # Target undercuts even the single smallest geography at the finest level
+        # reached (num_selected == 0) -- expand_contiguous still returns that
+        # geography's own median home value in this case (see its start_val >
+        # target_value short-circuit), so "how many houses could this buy" still
+        # has a real, if fractional, answer instead of a dead-end message.
+        # fractional_headline tiers the wording by actual house count -- a flat
+        # "smaller than a whole neighborhood" reads the same whether the money
+        # buys 3 houses or 300, since a tract can hold hundreds to thousands.
+        # Still led by target_label so this stays consistent with the
+        # num_selected > 0 branch above -- the reader always sees what dollar
+        # figure produced the result, not just what it bought.
+        headline = f"{target_label}: {fractional_headline(st.session_state.result_level, result.median_houses_to_target)}"
+        caption = (
+            f"≈ <strong>{fmt_houses(result.median_houses_to_target)}</strong> homes at local median price"
+            f" ({fmt_dollar(result.area_median_home_value)})"
+            f" · <strong>{fmt_houses(st.session_state.result_national_houses)}</strong> at national median"
+            f" ({fmt_dollar(st.session_state.result_national_median)})"
+        )
+        st.markdown(_stat_card_html(headline, caption), unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="pm-empty-banner">{st.session_state.status}</div>', unsafe_allow_html=True)
 
-if st.session_state.marker is not None:
-    # A one-line "where am I" anchor -- most useful at tract zoom, where the
-    # visible map area is a tiny sliver with no broader context on screen.
-    # County NAME already includes the state (e.g. "Alameda County,
-    # California"), so a single nearest-county lookup is enough; this is
-    # independent of the currently selected geo_level so it still works
-    # while viewing state- or tract-level results.
-    county_data = store.get_level("county")
-    if county_data is not None and county_data.centroids:
-        lat, lon = st.session_state.marker
-        nearest_county = county_data.nearest_geoid(lat, lon)
-        county_name = county_data.names.get(nearest_county)
-        if county_name:
-            st.caption(f"\U0001F4CD Viewing: {county_name}")
+    if st.session_state.marker is not None:
+        # A one-line "where am I" anchor -- most useful at tract zoom, where the
+        # visible map area is a tiny sliver with no broader context on screen.
+        # County NAME already includes the state (e.g. "Alameda County,
+        # California"), so a single nearest-county lookup is enough; this is
+        # independent of the currently selected geo_level so it still works
+        # while viewing state- or tract-level results.
+        county_data = store.get_level("county")
+        if county_data is not None and county_data.centroids:
+            lat, lon = st.session_state.marker
+            nearest_county = county_data.nearest_geoid(lat, lon)
+            county_name = county_data.names.get(nearest_county)
+            if county_name:
+                st.caption(f"\U0001F4CD Viewing: {county_name}")
 
-st.caption("Based on 2017–2021 Census estimates — order-of-magnitude, not exact.")
+    st.caption("Based on 2017–2021 Census estimates — order-of-magnitude, not exact.")
 
 geo_data = store.get_level(st.session_state.geo_level)
 
-selected_geoids = None
-if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
-    selected_geoids = set(st.session_state.result.selected_geoids)
+# Wrapped in a keyed container purely so the desktop media query above can
+# target it by its `.st-key-pm-map` class -- see that CSS block for why. This
+# also pulls the tract/county zoom-status banners in with the map itself
+# (rather than leaving them as unstyled top-level flex children), since
+# they're messaging about what the map below them is (or isn't) showing.
+with st.container(key="pm-map"):
+    selected_geoids = None
+    if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
+        selected_geoids = set(st.session_state.result.selected_geoids)
 
-render_gdf = None
-render_bbox = None
-if geo_data is not None:
-    if st.session_state.geo_level == "tract":
-        if st.session_state.map_zoom < TRACT_MIN_ZOOM:
-            st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
-        else:
-            pad = _zoom_scaled_pad(
-                st.session_state.map_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD
-            )
-            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
-            if render_bbox is not None:
-                render_gdf = geo_data.viewport_gdf(render_bbox)
+    render_gdf = None
+    render_bbox = None
+    if geo_data is not None:
+        if st.session_state.geo_level == "tract":
+            if st.session_state.map_zoom < TRACT_MIN_ZOOM:
+                st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
             else:
-                st.caption("Tap the map to load neighborhood boundaries there.")
-    elif st.session_state.geo_level == "county":
-        if st.session_state.map_zoom <= COUNTY_FULL_ZOOM_MAX:
-            # Zoomed out to (near) a national view -- county is already fully in memory
-            # and cheap to render whole, so show every county instead of clipping to a
-            # bbox that would cut off most of the country.
-            render_gdf = geo_data.full_gdf
+                pad = _zoom_scaled_pad(
+                    st.session_state.map_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD
+                )
+                render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
+                if render_bbox is not None:
+                    render_gdf = geo_data.viewport_gdf(render_bbox)
+                else:
+                    st.caption("Tap the map to load neighborhood boundaries there.")
+        elif st.session_state.geo_level == "county":
+            if st.session_state.map_zoom <= COUNTY_FULL_ZOOM_MAX:
+                # Zoomed out to (near) a national view -- county is already fully in memory
+                # and cheap to render whole, so show every county instead of clipping to a
+                # bbox that would cut off most of the country.
+                render_gdf = geo_data.full_gdf
+            else:
+                pad = _zoom_scaled_pad(
+                    st.session_state.map_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
+                )
+                render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
+                render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
         else:
-            pad = _zoom_scaled_pad(
-                st.session_state.map_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
-            )
-            render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
-            render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
-    else:
-        render_gdf = geo_data.full_gdf
+            render_gdf = geo_data.full_gdf
 
-fmap = build_map(
-    render_gdf=render_gdf,
-    overlay_mode=overlay_mode,
-    selected_geoids=selected_geoids,
-    marker_latlon=st.session_state.marker,
-    center=st.session_state.map_center,
-    zoom=st.session_state.map_zoom,
-    render_key=(st.session_state.geo_level, render_bbox),
-)
+    fmap = build_map(
+        render_gdf=render_gdf,
+        overlay_mode=overlay_mode,
+        selected_geoids=selected_geoids,
+        marker_latlon=st.session_state.marker,
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
+        render_key=(st.session_state.geo_level, render_bbox),
+    )
 
-# Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
-# script whenever a watched value changes, and both "center" and "bounds"
-# turned out to be unsafe to watch: rebuilding the folium.Map from scratch
-# every rerun and re-mounting it can report a slightly different position/
-# viewport than before (container-size timing, projection rounding), which
-# registers as a real pan and triggers another rerun -- a cascade that never
-# settles (see _tract_render_bbox for how tract geometry avoids needing
-# "bounds" at all). zoom is a plain integer with no such jitter risk, and is
-# needed for the tract auto-zoom banner regardless of the current level.
-map_data = st_folium(
-    fmap,
-    height=560,
-    use_container_width=True,
-    returned_objects=["last_clicked", "zoom"],
-    key="plutometer_map",
-)
+    # Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
+    # script whenever a watched value changes, and both "center" and "bounds"
+    # turned out to be unsafe to watch: rebuilding the folium.Map from scratch
+    # every rerun and re-mounting it can report a slightly different position/
+    # viewport than before (container-size timing, projection rounding), which
+    # registers as a real pan and triggers another rerun -- a cascade that never
+    # settles (see _tract_render_bbox for how tract geometry avoids needing
+    # "bounds" at all). zoom is a plain integer with no such jitter risk, and is
+    # needed for the tract auto-zoom banner regardless of the current level.
+    map_data = st_folium(
+        fmap,
+        height=560,
+        use_container_width=True,
+        returned_objects=["last_clicked", "zoom"],
+        key="plutometer_map",
+    )
 
 # ----------------------------------------------------------- main: controls --
 # Interactive controls below the map (not above, not in the sidebar) so the
@@ -480,57 +583,66 @@ map_data = st_folium(
 # selected value getting cut off mid-number -- most visible now that the main
 # column itself is capped to a comfortable desktop width (see the max-width rule
 # above) instead of stretching to fill however wide the browser window is.
-c1, c2, c3 = st.columns([1, 1.5, 1])
-with c1:
-    geo_level = st.selectbox(
-        "Geography Level",
-        options=available_levels,
-        format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
-        key="geo_level",
-        help=(
-            "State and County cover the whole country at any zoom. "
-            f"Neighborhood (Census tract) needs the map zoomed to level {TRACT_MIN_ZOOM}+ first."
-        ),
-    )
-with c2:
-    # Categories preserve reference_values.csv's row order (dict.fromkeys
-    # dedupes while keeping first-seen order) rather than sorting
-    # alphabetically, so related categories stay grouped the way the CSV
-    # author intended (percentiles first, national-scale figures last).
-    categories = list(dict.fromkeys(r["category"] for r in store.reference_values))
-    default_category = "Super-Rich Individuals"
-    category_index = categories.index(default_category) if default_category in categories else 0
-    wealth_category = st.selectbox(
-        "Wealth Category",
-        options=categories,
-        index=category_index,
-        key="wealth_category",
-        help="Pick a theme, then a specific amount within it below.",
-    )
+# Wrapped in a keyed container purely so the desktop media query above can
+# target it by its `.st-key-pm-controls` class -- see that CSS block for why.
+# At the narrow (~240px) width that media query gives this container on
+# desktop, Streamlit's own responsive column behavior (columns auto-stack
+# once their rendered width drops below its threshold, independent of this
+# CSS) takes over and stacks c1/c2/c3 vertically there too, same as it
+# already does on a narrow mobile viewport -- no extra layout code needed
+# for that case.
+with st.container(key="pm-controls"):
+    c1, c2, c3 = st.columns([1, 1.5, 1])
+    with c1:
+        geo_level = st.selectbox(
+            "Geography Level",
+            options=available_levels,
+            format_func=lambda lvl: LEVEL_LABELS.get(lvl, lvl),
+            key="geo_level",
+            help=(
+                "State and County cover the whole country at any zoom. "
+                f"Neighborhood (Census tract) needs the map zoomed to level {TRACT_MIN_ZOOM}+ first."
+            ),
+        )
+    with c2:
+        # Categories preserve reference_values.csv's row order (dict.fromkeys
+        # dedupes while keeping first-seen order) rather than sorting
+        # alphabetically, so related categories stay grouped the way the CSV
+        # author intended (percentiles first, national-scale figures last).
+        categories = list(dict.fromkeys(r["category"] for r in store.reference_values))
+        default_category = "Super-Rich Individuals"
+        category_index = categories.index(default_category) if default_category in categories else 0
+        wealth_category = st.selectbox(
+            "Wealth Category",
+            options=categories,
+            index=category_index,
+            key="wealth_category",
+            help="Pick a theme, then a specific amount within it below.",
+        )
 
-    filtered = [r for r in store.reference_values if r["category"] == wealth_category]
-    ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in filtered}
-    ref_labels = list(ref_options.keys())
-    # Default to Elon Musk's net worth so there's always a result to look at
-    # on first load, instead of a blank "-- Select --" state.
-    default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
-    # Keying on the category makes this a fresh widget whenever the category
-    # changes, so its selection can't get stuck pointing at an index/value
-    # that belonged to the previous category's option list.
-    ref_choice = st.selectbox(
-        "Amount", options=ref_labels, index=ref_labels.index(default_label), key=f"wealth_amount_{wealth_category}"
-    )
-with c3:
-    custom_raw = st.text_input(
-        "Custom amount",
-        placeholder="e.g. 500B or 1.5T",
-        help="Overrides the dropdown above. Accepts K/M/B/T shorthand, e.g. 500B or 1.5T.",
-    )
-    custom_parsed = parse_value(custom_raw)
-    if custom_raw and custom_parsed is None:
-        st.caption("Couldn't read that — try formats like 500B or 1.5T")
-    elif custom_raw and custom_parsed == 0:
-        st.caption("Enter an amount greater than $0")
+        filtered = [r for r in store.reference_values if r["category"] == wealth_category]
+        ref_options = {f"{r['name']} ({fmt_dollar(r['value'])})": r["value"] for r in filtered}
+        ref_labels = list(ref_options.keys())
+        # Default to Elon Musk's net worth so there's always a result to look at
+        # on first load, instead of a blank "-- Select --" state.
+        default_label = next((label for label in ref_labels if label.startswith("Elon Musk")), ref_labels[0])
+        # Keying on the category makes this a fresh widget whenever the category
+        # changes, so its selection can't get stuck pointing at an index/value
+        # that belonged to the previous category's option list.
+        ref_choice = st.selectbox(
+            "Amount", options=ref_labels, index=ref_labels.index(default_label), key=f"wealth_amount_{wealth_category}"
+        )
+    with c3:
+        custom_raw = st.text_input(
+            "Custom amount",
+            placeholder="e.g. 500B or 1.5T",
+            help="Overrides the dropdown above. Accepts K/M/B/T shorthand, e.g. 500B or 1.5T.",
+        )
+        custom_parsed = parse_value(custom_raw)
+        if custom_raw and custom_parsed is None:
+            st.caption("Couldn't read that — try formats like 500B or 1.5T")
+        elif custom_raw and custom_parsed == 0:
+            st.caption("Enter an amount greater than $0")
 
 if custom_parsed:
     target_value = custom_parsed
