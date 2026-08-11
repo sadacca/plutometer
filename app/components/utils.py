@@ -1,5 +1,6 @@
 """Formatting, parsing, and color helpers for plutometer's Streamlit UI."""
 
+import math
 import re
 
 SUFFIX_MULTIPLIERS = {"K": 1e3, "M": 1e6, "B": 1e9, "T": 1e12}
@@ -26,23 +27,29 @@ TRACT_MIN_ZOOM = 8
 # off to filling the actual nearest geography, since a house count in that range is
 # large enough that "how much of this real shape" becomes the more honest answer than
 # an arbitrarily-sized circle floating over it.
-DOT_MIN_RADIUS_PX = 8
-DOT_MAX_RADIUS_PX = 32
 # Kept below the whole-selection fill opacity (0.55, see map_view._add_highlight_layer)
 # so a partial match is never visually confusable with "you got the whole thing."
 PARTIAL_FILL_OPACITY_FLOOR = 0.2
 PARTIAL_FILL_OPACITY_CAP = 0.45
+# Dashed, not solid -- the border style itself (not just a lighter fill) is what marks
+# a partial-match layer as "approximate," so it stays visually distinct from a whole
+# selection even in overlay modes/zoom levels where the opacity difference is subtle.
+PARTIAL_DASH_ARRAY = "6, 4"
 
-
-def dot_radius(houses: float) -> float:
-    """Partial-match marker radius (px), sqrt-scaled so growth is area-linear in house
-    count rather than radius-linear -- otherwise small increases near the low end would
-    visually overstate themselves. Saturates at FEW_HOUSES_MAX, the same threshold
-    fractional_headline uses for its "a few houses" wording, so the map's dot-vs-fill
-    switch never disagrees with the headline text on screen at the same time.
-    """
-    frac = max(0.0, min(1.0, houses / FEW_HOUSES_MAX))
-    return DOT_MIN_RADIUS_PX + (DOT_MAX_RADIUS_PX - DOT_MIN_RADIUS_PX) * (frac**0.5)
+# One dot per house, not one shape whose size encodes the count -- literal individual
+# units read as more concrete than an abstract growing circle, and it's what keeps a
+# single house from ballooning past the click marker itself (radius 7px, see
+# map_view._add_marker) into something that reads as "a lot" for just one house. Sized
+# to just ring that marker, not dwarf it.
+PARTIAL_DOT_DIAMETER_PX = 16
+PARTIAL_DOT_CLUSTER_CAP = 6  # dots stop multiplying past this -- exact count is already
+                              # in the result text, this only needs to read as "several"
+PARTIAL_DOT_RING_BASE_PX = 10  # distance from the anchor dot (the 1st house, always at
+                                # the click point) to its nearest sibling -- close enough
+                                # to overlap it a little, like adjoining houses
+PARTIAL_DOT_RING_MAX_GROWTH_PX = 18  # extra ring radius at FEW_HOUSES_MAX houses
+PARTIAL_DOT_OPACITY_FLOOR = 0.3
+PARTIAL_DOT_OPACITY_FULL = 0.85
 
 
 def partial_fill_opacity(fraction: float) -> float:
@@ -50,6 +57,26 @@ def partial_fill_opacity(fraction: float) -> float:
     value the target represents (target_value / geography_value)."""
     t = max(0.0, min(1.0, fraction))
     return PARTIAL_FILL_OPACITY_FLOOR + (PARTIAL_FILL_OPACITY_CAP - PARTIAL_FILL_OPACITY_FLOOR) * t
+
+
+def partial_dot_positions(houses: float) -> list[tuple[float, float]]:
+    """Pixel (dx, dy) offsets from the marker for each individual "house" dot, houses >= 1.
+    One dot always sits exactly on the click point (a single house just barely rings that
+    point); each additional house up to PARTIAL_DOT_CLUSTER_CAP adds one more small dot
+    around it. The ring radius keeps growing gently (sqrt-damped) with the *actual* house
+    count all the way to FEW_HOUSES_MAX even after the dot count itself caps out, so the
+    cluster doesn't visually freeze for the whole 6-to-50-house range.
+    """
+    n = max(1, min(round(houses), PARTIAL_DOT_CLUSTER_CAP))
+    positions = [(0.0, 0.0)]
+    siblings = n - 1
+    if siblings > 0:
+        growth = min(max(houses, 1.0), FEW_HOUSES_MAX) / FEW_HOUSES_MAX
+        ring_r = PARTIAL_DOT_RING_BASE_PX + PARTIAL_DOT_RING_MAX_GROWTH_PX * (growth**0.5)
+        for i in range(siblings):
+            angle = 2 * math.pi * i / siblings
+            positions.append((ring_r * math.cos(angle), ring_r * math.sin(angle)))
+    return positions
 
 
 def geo_label(level: str, count: float) -> str:

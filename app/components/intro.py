@@ -10,8 +10,12 @@ auto-advance, free-text location search -- this first pass doesn't attempt).
 
 The map stays mounted and in the same page position through every step
 (place/visual continuity was an explicit requirement) rather than being
-swapped out for a graphic on the sub-house steps -- those steps just don't
-attach a highlight layer to it, and lean on a text+icon card instead.
+swapped out for a graphic. The sub-house steps lean on a text+icon card as
+the primary explanation, but also attach the same partial-match map
+indicator (dashed dot cluster or geography fill) that a real click on the
+main map would produce for the same fractional result -- see
+components/map_view.py's build_map -- so the map isn't just idle chrome
+during those steps.
 """
 
 import streamlit as st
@@ -220,9 +224,11 @@ def _progress_dots_html(current_idx: int, total: int) -> str:
     return f'<div style="display:flex;align-items:center;height:9px;">{"".join(dots)}</div>'
 
 
-def _local_median_home_value(store, lat: float, lon: float) -> float:
-    """Finest-available local median home price at this point -- tract if loaded
-    (most locally accurate), county otherwise, national median as a last resort.
+def _local_geo_context(store, lat: float, lon: float) -> tuple[str, str, float, float]:
+    """Finest-available local geography at this point (tract if loaded, county
+    otherwise) -- level, GEOID, that geography's own total residential value, and its
+    median home price. The GEOID/level let a caller draw the same partial-match map
+    indicator app.py's main click flow uses, not just divide by a price.
     """
     for level in ("tract", "county"):
         geo_data = store.get_level(level)
@@ -230,8 +236,29 @@ def _local_median_home_value(store, lat: float, lon: float) -> float:
             geoid = geo_data.nearest_geoid(lat, lon)
             mhv = geo_data.enrichment.get(geoid, {}).get("median_home_value", 0)
             if mhv > 0:
-                return mhv
-    return store.national_median_home_value
+                return level, geoid, geo_data.values.get(geoid, 0.0), mhv
+    return "", "", 0.0, store.national_median_home_value
+
+
+def _local_median_home_value(store, lat: float, lon: float) -> float:
+    """Finest-available local median home price at this point -- tract if loaded
+    (most locally accurate), county otherwise, national median as a last resort.
+    """
+    return _local_geo_context(store, lat, lon)[3]
+
+
+def _fractional_render_gdf(store, level: str, marker_latlon: tuple[float, float]):
+    """render_gdf slice for a single partial-match geography -- the full in-memory gdf
+    for county, or a tight viewport fetch around the marker for tract (whose geometry
+    isn't held in memory at all, see data_loader.py).
+    """
+    geo_data = store.get_level(level)
+    if geo_data is None:
+        return None
+    if level == "tract":
+        bbox = _tract_render_bbox(geo_data, [], marker_latlon)
+        return geo_data.viewport_gdf(bbox) if bbox is not None else None
+    return geo_data.full_gdf
 
 
 def _ref_value(store, ref_name: str, fallback: float) -> float:
@@ -422,6 +449,9 @@ def render_intro(store) -> None:
 
     render_gdf = None
     selected_geoids = None
+    partial_geoid = None
+    partial_houses = 0.0
+    partial_fraction = 0.0
     national_median = store.national_median_home_value
 
     if step_id == "framing":
@@ -449,9 +479,14 @@ def render_intro(store) -> None:
             # priciest markets -- that's still a real, worthwhile result, so fall back
             # to the same fractional/icon-row treatment the smaller tiers use rather
             # than a dead end.
-            local_median = _local_median_home_value(store, lat, lon)
+            geo_level, geoid, geo_value, local_median = _local_geo_context(store, lat, lon)
             houses = value / local_median if local_median > 0 else 0.0
             _render_fractional_step(step, value, houses, local_median)
+            if geoid:
+                partial_geoid = geoid
+                partial_houses = houses
+                partial_fraction = value / geo_value if geo_value > 0 else 0.0
+                render_gdf = _fractional_render_gdf(store, geo_level, (lat, lon))
 
     elif step_id == "country":
         value, target_label = _pick_country_value(store)
@@ -486,9 +521,14 @@ def render_intro(store) -> None:
     else:
         step = next(s for s in WEALTH_STEPS if s["id"] == step_id)
         value = _ref_value(store, step["ref_name"], step["fallback"])
-        local_median = _local_median_home_value(store, lat, lon)
+        geo_level, geoid, geo_value, local_median = _local_geo_context(store, lat, lon)
         houses = value / local_median if local_median > 0 else 0.0
         _render_fractional_step(step, value, houses, local_median)
+        if geoid:
+            partial_geoid = geoid
+            partial_houses = houses
+            partial_fraction = value / geo_value if geo_value > 0 else 0.0
+            render_gdf = _fractional_render_gdf(store, geo_level, (lat, lon))
 
     fmap = build_map(
         render_gdf=render_gdf,
@@ -498,6 +538,9 @@ def render_intro(store) -> None:
         center=(lat, lon),
         zoom=STEP_ZOOM[step_id],
         render_key=("intro", step_id, st.session_state.intro_location),
+        partial_geoid=partial_geoid,
+        partial_houses=partial_houses,
+        partial_fraction=partial_fraction,
     )
     st_folium(fmap, height=420, use_container_width=True, returned_objects=[], key="plutometer_intro_map")
 

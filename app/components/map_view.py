@@ -10,7 +10,11 @@ from components.utils import (
     FEW_HOUSES_MAX,
     HIGHLIGHT_BORDER,
     HIGHLIGHT_FILL,
-    dot_radius,
+    PARTIAL_DASH_ARRAY,
+    PARTIAL_DOT_DIAMETER_PX,
+    PARTIAL_DOT_OPACITY_FLOOR,
+    PARTIAL_DOT_OPACITY_FULL,
+    partial_dot_positions,
     partial_fill_opacity,
     price_color,
 )
@@ -186,22 +190,49 @@ def _add_partial_fill_layer(m: folium.Map, gdf: gpd.GeoDataFrame, geoid: str, fr
     opacity = partial_fill_opacity(fraction)
 
     def style_function(_feature):
-        return {"color": HIGHLIGHT_BORDER, "weight": 2, "fillColor": HIGHLIGHT_FILL, "fillOpacity": opacity}
+        return {
+            "color": HIGHLIGHT_BORDER,
+            "weight": 2,
+            "dashArray": PARTIAL_DASH_ARRAY,
+            "fillColor": HIGHLIGHT_FILL,
+            "fillOpacity": opacity,
+        }
 
     folium.GeoJson(sub[["GEOID", "geometry"]], name="partial-fill", style_function=style_function).add_to(m)
 
 
 def _add_partial_dot(m: folium.Map, marker_latlon: tuple[float, float], houses: float) -> None:
-    # Fixed opacity, not scaled by houses -- radius is the only channel here (see
-    # dot_radius's docstring), so this stays a plain solid dot that just grows.
-    folium.CircleMarker(
+    """One small dashed-outline dot per house (see partial_dot_positions), or -- below
+    one house -- a single such dot whose opacity stands in for the fraction, since a
+    discrete dot count only means something once it reaches a whole house.
+    """
+    if houses < 1:
+        positions = [(0.0, 0.0)]
+        opacity = PARTIAL_DOT_OPACITY_FLOOR + (PARTIAL_DOT_OPACITY_FULL - PARTIAL_DOT_OPACITY_FLOOR) * max(
+            0.0, houses
+        )
+    else:
+        positions = partial_dot_positions(houses)
+        opacity = PARTIAL_DOT_OPACITY_FULL
+
+    r = PARTIAL_DOT_DIAMETER_PX / 2
+    extent = max((dx**2 + dy**2) ** 0.5 for dx, dy in positions) + r
+    container = extent * 2
+    center = container / 2
+
+    dots_html = "".join(
+        f'<div style="position:absolute;left:{center + dx - r:.1f}px;top:{center + dy - r:.1f}px;'
+        f"width:{PARTIAL_DOT_DIAMETER_PX}px;height:{PARTIAL_DOT_DIAMETER_PX}px;border-radius:50%;"
+        f'border:1.5px dashed {HIGHLIGHT_BORDER};background:{HIGHLIGHT_FILL};opacity:{opacity:.2f};"></div>'
+        for dx, dy in positions
+    )
+    folium.Marker(
         location=list(marker_latlon),
-        radius=dot_radius(houses),
-        color=HIGHLIGHT_BORDER,
-        weight=1.5,
-        fill=True,
-        fill_color=HIGHLIGHT_FILL,
-        fill_opacity=0.75,
+        icon=folium.DivIcon(
+            html=f'<div style="position:relative;width:{container:.1f}px;height:{container:.1f}px;">{dots_html}</div>',
+            icon_size=(container, container),
+            icon_anchor=(center, center),
+        ),
     ).add_to(m)
 
 
@@ -238,7 +269,7 @@ def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool, has_parti
         sections.append(f"""
           <div style="display:flex;align-items:center;gap:6px;font-weight:600;width:120px;{divider}">
             <span style="width:12px;height:12px;border-radius:50%;display:inline-block;flex-shrink:0;
-                        background:{HIGHLIGHT_FILL};opacity:0.65;border:1.5px solid {HIGHLIGHT_BORDER};"></span>
+                        background:{HIGHLIGHT_FILL};opacity:0.65;border:1.5px dashed {HIGHLIGHT_BORDER};"></span>
             <span>Partial match</span>
           </div>
         """)
