@@ -79,13 +79,18 @@ STEP_IDS = ["framing"] + [s["id"] for s in WEALTH_STEPS] + [s["id"] for s in GEO
 # tract-cluster scale for the billionaire step, out again to a full national view once
 # the country steps need to show multiple contiguous states/counties. country_county's
 # selection is a comparable (often larger) geographic footprint to country's, despite
-# being made of much smaller units, so it keeps the same wide zoom.
+# being made of much smaller units, so it keeps the same wide zoom. billionaire pulls
+# back two notches further than the tract cluster itself needs (13 would frame the
+# selected tracts tightly) so the surrounding metro -- streets, neighboring
+# neighborhoods, the city's overall shape -- stays visible for context; see
+# _tract_render_bbox's pad at that step's call site for the matching wider geometry
+# fetch, so the extra screen space isn't just empty basemap.
 STEP_ZOOM = {
     "framing": 12,
     "median": 15,
     "block": 14,
     "county": 12,
-    "billionaire": 13,
+    "billionaire": 11,
     "country": 5,
     "country_county": 5,
 }
@@ -429,7 +434,11 @@ def render_intro(store) -> None:
         tract_data = store.get_level("tract")
         shown = False
         if result is not None and result.num_selected > 0 and tract_data is not None:
-            bbox = _tract_render_bbox(tract_data, result.selected_geoids, (lat, lon))
+            # Wider than the default pad -- matches this step's pulled-back zoom (see
+            # STEP_ZOOM's comment) so the tract layer actually covers the visible metro
+            # area instead of leaving a bare basemap ring around a small highlighted
+            # island.
+            bbox = _tract_render_bbox(tract_data, result.selected_geoids, (lat, lon), pad=0.25)
             if bbox is not None:
                 render_gdf = tract_data.viewport_gdf(bbox)
                 selected_geoids = set(result.selected_geoids)
