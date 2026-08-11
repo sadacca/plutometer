@@ -20,6 +20,7 @@ app only ever reads these files, it never re-runs this pipeline itself.
 
 import argparse
 import pickle
+import time
 import zipfile
 from pathlib import Path
 
@@ -105,28 +106,54 @@ def accurate_centroids(geometry: gpd.GeoSeries) -> gpd.GeoSeries:
     return projected.set_crs(CENTROID_CRS).to_crs(4326)
 
 
+DOWNLOAD_MAX_ATTEMPTS = 4
+
+
 def download_file(url: str, dest: Path, description: str) -> Path:
-    """Download a file if it doesn't already exist."""
+    """Download a file if it doesn't already exist. Census's servers occasionally drop
+    the connection mid-transfer on files this size (observed: a ChunkedEncodingError
+    partway through the ~55MB tract shapefile) -- retries a few times with backoff
+    before giving up, and always removes a partial download on failure rather than
+    leaving it behind. That removal matters beyond just this attempt: the `dest.exists()`
+    skip-check above has no way to tell a truncated file from a complete one, so a
+    partial file left on disk would make the *next* run silently treat corrupt data as
+    already-downloaded instead of retrying.
+    """
     if dest.exists():
         print(f"  {description}: already downloaded, skipping")
         return dest
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    print(f"  {description}: downloading from {url}")
-    resp = requests.get(url, stream=True, timeout=300)
-    resp.raise_for_status()
+    for attempt in range(1, DOWNLOAD_MAX_ATTEMPTS + 1):
+        suffix = f" (attempt {attempt}/{DOWNLOAD_MAX_ATTEMPTS})" if attempt > 1 else ""
+        try:
+            print(f"  {description}: downloading from {url}{suffix}")
+            resp = requests.get(url, stream=True, timeout=300)
+            resp.raise_for_status()
 
-    total = int(resp.headers.get("content-length", 0))
-    downloaded = 0
-    with open(dest, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=65536):
-            f.write(chunk)
-            downloaded += len(chunk)
-            if total > 0:
-                pct = downloaded * 100 // total
-                print(f"\r  {description}: {pct}% ({downloaded // 1024 // 1024}MB)", end="", flush=True)
-    print()
-    return dest
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        pct = downloaded * 100 // total
+                        print(f"\r  {description}: {pct}% ({downloaded // 1024 // 1024}MB)", end="", flush=True)
+            print()
+            if total > 0 and downloaded != total:
+                raise requests.exceptions.ChunkedEncodingError(
+                    f"{description}: got {downloaded} bytes, expected {total}"
+                )
+            return dest
+        except (requests.exceptions.RequestException, OSError) as exc:
+            dest.unlink(missing_ok=True)
+            if attempt == DOWNLOAD_MAX_ATTEMPTS:
+                raise
+            wait = 2**attempt
+            print(f"  {description}: download failed ({exc}); retrying in {wait}s...")
+            time.sleep(wait)
+    raise AssertionError("unreachable")  # loop always returns or raises
 
 
 def download_and_extract_shp(url: str, name: str) -> Path:
