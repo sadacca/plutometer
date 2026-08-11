@@ -4,7 +4,7 @@ Big numbers are hard to feel. A hundreds of billions of dollars sounds like a lo
 
 This tool answers that question by mapping wealth onto real neighborhoods. Pick a dollar amount, click anywhere on the map, and see the contiguous area whose total home values add up to that figure.
 
-**A single person's fortune might equal every home in a whole state or several whole states.** That's not a metaphor, it's the actual scale of some individual's wealth.
+**A single person's fortune might equal every home in a whole state or several whole states.** That's not a metaphor, it's the actual scale of wealth.
 
 ## Quick Start
 
