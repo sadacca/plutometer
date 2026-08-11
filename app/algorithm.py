@@ -27,6 +27,13 @@ class ExpansionResult:
     area_median_home_value: float = 0.0
     area_total_housing_units: float = 0.0
     median_houses_to_target: float = 0.0
+    # Populated only when num_selected == 0 (start geography alone exceeds target) --
+    # the geography that was tried and rejected, and what fraction of *its* total
+    # value the target represents. Lets the map show a partial-match indicator for
+    # that one geography instead of nothing, without the algorithm needing to know
+    # anything about rendering.
+    nearest_geoid: str = ""
+    nearest_value_fraction: float = 0.0
 
 
 def find_nearest_geoid(
@@ -123,6 +130,8 @@ def expand_contiguous(
             area_median_home_value=start_home_value,
             area_total_housing_units=0.0,
             median_houses_to_target=start_houses,
+            nearest_geoid=start_geoid,
+            nearest_value_fraction=target_value / start_val if start_val > 0 else 0.0,
         )
 
     selected.add(start_geoid)
