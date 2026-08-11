@@ -38,7 +38,7 @@ WEALTH_STEPS = [
     },
     {
         "id": "county",
-        "name": "The richest household in the county",
+        "name": "The 0.1%, e.g. the richest household in the county",
         "ref_name": "99.9th Percentile Household Net Worth",
         "fallback": 46_369_052,
     },
@@ -55,7 +55,7 @@ WEALTH_STEPS = [
 GEO_STEPS = [
     {
         "id": "billionaire",
-        "name": "A local billionaire",
+        "name": "'just' a billionaire",
         "ref_name": "A $1 Billion Fortune ('just' a billionaire)",
         "fallback": 1_000_000_000,
         "level": "tract",
@@ -312,7 +312,7 @@ def _render_framing_step() -> None:
             "mortgage. Sensible. Forgettable."
             "<br><br>"
             "<strong>The question this tool actually asks:</strong> what if every dollar "
-            "you had -- not just your paycheck, <em>everything</em> -- went into real "
+            "you had -- not just your paycheck, <em> but everything</em> -- went into real "
             "estate instead? No savings, no retirement account, just houses. Let's see how "
             "far that gets you.",
         ),
