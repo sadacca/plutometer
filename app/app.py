@@ -543,29 +543,50 @@ if map_data:
     if map_data.get("zoom") is not None:
         st.session_state.map_zoom = map_data["zoom"]
 
+    # streamlit_folium keys its component instance off a hash of the *rendered
+    # map's own JS* (see generate_js_hash in streamlit_folium/__init__.py), not
+    # a stable widget id -- so the instant the map's content changes (e.g. a
+    # geo_level switch swaps in different boundaries), it's a brand-new
+    # component instance with no memory of the last physical click, and
+    # "last_clicked" reports None again on this very rerun, even though the
+    # user didn't tap anywhere new. A literal new click always survives one
+    # rerun (the map hasn't been rebuilt with its consequences yet), so it's
+    # used when present; otherwise fall back to the last known marker so that
+    # changing Geography Level / Wealth Category / Amount below still
+    # re-triggers the algorithm at the same point instead of silently doing
+    # nothing until the user clicks the map again.
     clicked = map_data.get("last_clicked")
     if clicked:
-        click_key = (round(clicked["lat"], 6), round(clicked["lng"], 6), target_value, st.session_state.geo_level)
-        if click_key != st.session_state.last_clicked_processed:
-            st.session_state.last_clicked_processed = click_key
-            # Recenter the *next* rebuilt map on the click itself, not just on a
-            # successful computation's marker -- otherwise a click made before
-            # the map is zoomed to TRACT_MIN_ZOOM (which can't run a computation
-            # yet, see the tract-zoom branch below) leaves the map's location
-            # pinned at DEFAULT_CENTER while the user tries to scroll-zoom in.
-            # Since "zoom" is a watched returned_object, every zoom tick reruns
-            # the script and rebuilds the folium.Map from scratch at whatever
-            # center/zoom we hand it -- so without this, each zoom step snaps
-            # the view back to the geographic center of the US instead of
-            # staying put over the spot the user actually clicked.
-            st.session_state.map_center = (clicked["lat"], clicked["lng"])
+        point = (round(clicked["lat"], 6), round(clicked["lng"], 6))
+    elif st.session_state.marker is not None:
+        point = (round(st.session_state.marker[0], 6), round(st.session_state.marker[1], 6))
+    else:
+        point = None
+
+    if point is not None:
+        compute_key = (point[0], point[1], target_value, st.session_state.geo_level)
+        if compute_key != st.session_state.last_clicked_processed:
+            st.session_state.last_clicked_processed = compute_key
+            if clicked:
+                # Recenter the *next* rebuilt map on the click itself, not just on a
+                # successful computation's marker -- otherwise a click made before
+                # the map is zoomed to TRACT_MIN_ZOOM (which can't run a computation
+                # yet, see the tract-zoom branch below) leaves the map's location
+                # pinned at DEFAULT_CENTER while the user tries to scroll-zoom in.
+                # Since "zoom" is a watched returned_object, every zoom tick reruns
+                # the script and rebuilds the folium.Map from scratch at whatever
+                # center/zoom we hand it -- so without this, each zoom step snaps
+                # the view back to the geographic center of the US instead of
+                # staying put over the spot the user actually clicked. Skipped when
+                # falling back to the stored marker (a dropdown change, not a
+                # click) so that doesn't yank the view off wherever the user has
+                # since panned to.
+                st.session_state.map_center = (clicked["lat"], clicked["lng"])
             if not target_value:
                 st.session_state.status = "Select or enter a total wealth amount below."
             elif st.session_state.geo_level == "tract" and st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.session_state.status = f"Zoom in to level {TRACT_MIN_ZOOM}+ to use neighborhood mode."
             else:
                 with st.spinner("Finding the largest area that fits..."):
-                    _run_computation(
-                        clicked["lat"], clicked["lng"], target_value, st.session_state.geo_level, target_label
-                    )
+                    _run_computation(point[0], point[1], target_value, st.session_state.geo_level, target_label)
                 st.rerun()
