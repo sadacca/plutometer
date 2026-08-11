@@ -40,16 +40,34 @@ PARTIAL_DASH_ARRAY = "6, 4"
 # units read as more concrete than an abstract growing circle, and it's what keeps a
 # single house from ballooning past the click marker itself (radius 7px, see
 # map_view._add_marker) into something that reads as "a lot" for just one house. Sized
-# to just ring that marker, not dwarf it.
-PARTIAL_DOT_DIAMETER_PX = 16
+# to just ring that marker, not dwarf it. All sizes below are a baseline tuned for
+# PARTIAL_DOT_REF_ZOOM -- see partial_dot_zoom_scale for why they can't just be fixed
+# pixel constants the way the click marker's own halo is.
+PARTIAL_DOT_DIAMETER_PX = 14
 PARTIAL_DOT_CLUSTER_CAP = 6  # dots stop multiplying past this -- exact count is already
                               # in the result text, this only needs to read as "several"
-PARTIAL_DOT_RING_BASE_PX = 10  # distance from the anchor dot (the 1st house, always at
-                                # the click point) to its nearest sibling -- close enough
-                                # to overlap it a little, like adjoining houses
-PARTIAL_DOT_RING_MAX_GROWTH_PX = 18  # extra ring radius at FEW_HOUSES_MAX houses
+PARTIAL_DOT_RING_BASE_PX = 11  # ring radius at the 2nd house (1 sibling around the anchor)
+PARTIAL_DOT_RING_STEP_PX = 5  # ring radius added per additional house, up to the cluster
+                                # cap -- linear, not damped, so 2 vs. 3 vs. 4 houses are
+                                # actually distinguishable instead of nearly identical
+PARTIAL_DOT_RING_EXTRA_PX = 20  # further (sqrt-damped) ring growth from the cap's house
+                                  # count up to FEW_HOUSES_MAX, so the cluster keeps
+                                  # growing even once the dot count itself stops
 PARTIAL_DOT_OPACITY_FLOOR = 0.3
 PARTIAL_DOT_OPACITY_FULL = 0.85
+
+# A fixed pixel size looks right at one zoom and wrong at every other one -- the actual
+# geography around it (the tract outline, the gradient fill) shrinks on screen as you
+# zoom out, so a constant-size dot cluster increasingly overshoots it and reads as
+# oversized. TRACT_MIN_ZOOM is what the app auto-lands on for a fractional tract result
+# (see app.py's auto-cascade), so it's the zoom the sizes above are tuned for; scaling
+# by 2x per zoom level away from it matches how Web Mercator itself halves
+# degrees-per-pixel per +1 zoom, so the cluster tracks the geography's own on-screen
+# size instead of staying fixed. Clamped so it never disappears (zoomed way out) or
+# balloons (zoomed way in).
+PARTIAL_DOT_REF_ZOOM = TRACT_MIN_ZOOM
+PARTIAL_DOT_MIN_SCALE = 0.3
+PARTIAL_DOT_MAX_SCALE = 1.6
 
 
 def partial_fill_opacity(fraction: float) -> float:
@@ -59,20 +77,32 @@ def partial_fill_opacity(fraction: float) -> float:
     return PARTIAL_FILL_OPACITY_FLOOR + (PARTIAL_FILL_OPACITY_CAP - PARTIAL_FILL_OPACITY_FLOOR) * t
 
 
+def partial_dot_zoom_scale(zoom: int) -> float:
+    """Screen-size multiplier for the partial-match dot cluster at the given zoom,
+    relative to its PARTIAL_DOT_REF_ZOOM-tuned baseline size -- see that constant's
+    comment for why this needs to exist at all.
+    """
+    return max(PARTIAL_DOT_MIN_SCALE, min(PARTIAL_DOT_MAX_SCALE, 2 ** (zoom - PARTIAL_DOT_REF_ZOOM)))
+
+
 def partial_dot_positions(houses: float) -> list[tuple[float, float]]:
-    """Pixel (dx, dy) offsets from the marker for each individual "house" dot, houses >= 1.
-    One dot always sits exactly on the click point (a single house just barely rings that
-    point); each additional house up to PARTIAL_DOT_CLUSTER_CAP adds one more small dot
-    around it. The ring radius keeps growing gently (sqrt-damped) with the *actual* house
-    count all the way to FEW_HOUSES_MAX even after the dot count itself caps out, so the
-    cluster doesn't visually freeze for the whole 6-to-50-house range.
+    """Baseline (pre zoom-scale) pixel (dx, dy) offsets from the marker for each
+    individual "house" dot, houses >= 1. One dot always sits exactly on the click point
+    (a single house just barely rings that point); each additional house up to
+    PARTIAL_DOT_CLUSTER_CAP adds one more small dot around it, spaced linearly so low
+    counts are visually distinguishable. Past the cap, the ring keeps growing (more
+    gently) with the *actual* house count up to FEW_HOUSES_MAX even though the dot count
+    itself has stopped, so the cluster doesn't visually freeze for that whole range.
     """
     n = max(1, min(round(houses), PARTIAL_DOT_CLUSTER_CAP))
     positions = [(0.0, 0.0)]
     siblings = n - 1
     if siblings > 0:
-        growth = min(max(houses, 1.0), FEW_HOUSES_MAX) / FEW_HOUSES_MAX
-        ring_r = PARTIAL_DOT_RING_BASE_PX + PARTIAL_DOT_RING_MAX_GROWTH_PX * (growth**0.5)
+        ring_r = PARTIAL_DOT_RING_BASE_PX + PARTIAL_DOT_RING_STEP_PX * (siblings - 1)
+        if houses > PARTIAL_DOT_CLUSTER_CAP:
+            span = max(FEW_HOUSES_MAX - PARTIAL_DOT_CLUSTER_CAP, 1)
+            t = min(houses, FEW_HOUSES_MAX) - PARTIAL_DOT_CLUSTER_CAP
+            ring_r += PARTIAL_DOT_RING_EXTRA_PX * (t / span) ** 0.5
         for i in range(siblings):
             angle = 2 * math.pi * i / siblings
             positions.append((ring_r * math.cos(angle), ring_r * math.sin(angle)))
