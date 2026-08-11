@@ -18,6 +18,39 @@ HIGHLIGHT_FILL = "#F57C00"
 HIGHLIGHT_BORDER = "#E65100"
 TRACT_MIN_ZOOM = 8
 
+# Partial-match map indicator (num_selected == 0, i.e. the target undercuts even the
+# nearest whole geography). Below FEW_HOUSES_MAX houses, a growing dot at the marker
+# carries the magnitude -- a fixed-size shape can use its full visual range regardless
+# of how big the underlying geography is, which a fill opacity can't at these tiny
+# fractions (see PARTIAL_FILL_OPACITY_FLOOR). At/above FEW_HOUSES_MAX, the dot hands
+# off to filling the actual nearest geography, since a house count in that range is
+# large enough that "how much of this real shape" becomes the more honest answer than
+# an arbitrarily-sized circle floating over it.
+DOT_MIN_RADIUS_PX = 8
+DOT_MAX_RADIUS_PX = 32
+# Kept below the whole-selection fill opacity (0.55, see map_view._add_highlight_layer)
+# so a partial match is never visually confusable with "you got the whole thing."
+PARTIAL_FILL_OPACITY_FLOOR = 0.2
+PARTIAL_FILL_OPACITY_CAP = 0.45
+
+
+def dot_radius(houses: float) -> float:
+    """Partial-match marker radius (px), sqrt-scaled so growth is area-linear in house
+    count rather than radius-linear -- otherwise small increases near the low end would
+    visually overstate themselves. Saturates at FEW_HOUSES_MAX, the same threshold
+    fractional_headline uses for its "a few houses" wording, so the map's dot-vs-fill
+    switch never disagrees with the headline text on screen at the same time.
+    """
+    frac = max(0.0, min(1.0, houses / FEW_HOUSES_MAX))
+    return DOT_MIN_RADIUS_PX + (DOT_MAX_RADIUS_PX - DOT_MIN_RADIUS_PX) * (frac**0.5)
+
+
+def partial_fill_opacity(fraction: float) -> float:
+    """Fill opacity for the partial-match geography, scaled by how much of its total
+    value the target represents (target_value / geography_value)."""
+    t = max(0.0, min(1.0, fraction))
+    return PARTIAL_FILL_OPACITY_FLOOR + (PARTIAL_FILL_OPACITY_CAP - PARTIAL_FILL_OPACITY_FLOOR) * t
+
 
 def geo_label(level: str, count: float) -> str:
     """Singular/plural geography label, e.g. geo_label('state', 1) -> 'whole state',

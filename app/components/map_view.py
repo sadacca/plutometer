@@ -6,7 +6,14 @@ import geopandas as gpd
 import folium
 import streamlit as st
 
-from components.utils import HIGHLIGHT_BORDER, HIGHLIGHT_FILL, price_color
+from components.utils import (
+    FEW_HOUSES_MAX,
+    HIGHLIGHT_BORDER,
+    HIGHLIGHT_FILL,
+    dot_radius,
+    partial_fill_opacity,
+    price_color,
+)
 
 BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
 BASEMAP_ATTR = "&copy; OpenStreetMap &copy; CARTO"
@@ -25,6 +32,9 @@ def build_map(
     center: tuple[float, float] = DEFAULT_CENTER,
     zoom: int = DEFAULT_ZOOM,
     render_key: tuple = (),
+    partial_geoid: str | None = None,
+    partial_houses: float = 0.0,
+    partial_fraction: float = 0.0,
 ) -> folium.Map:
     """Build the map for the current render pass. render_gdf is already resolved by the
     caller to the right slice for the active level (full state/county gdf, or the current
@@ -34,6 +44,13 @@ def build_map(
     reruns which don't change the map view (typing in a text box, toggling an unrelated
     control) can reuse the already-serialized/styled GeoJSON instead of re-walking every
     feature -- see _styled_geojson.
+
+    partial_geoid/partial_houses/partial_fraction describe the num_selected == 0 case --
+    the target undercuts even the nearest whole geography (partial_geoid), which fits
+    partial_houses worth of homes at that geography's own median price. Below
+    FEW_HOUSES_MAX houses this draws a size-scaled dot at the marker; at/above it, an
+    opacity-scaled fill of partial_geoid itself -- see components/utils.py's dot_radius
+    and partial_fill_opacity docstrings for why the switch happens there.
     """
     m = folium.Map(location=list(center), zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=BASEMAP_URL, attr=BASEMAP_ATTR, name="basemap", max_zoom=18).add_to(m)
@@ -42,7 +59,13 @@ def build_map(
         _add_gradient_layer(m, render_gdf, overlay_mode, render_key)
         if selected_geoids:
             _add_highlight_layer(m, render_gdf, selected_geoids)
-        _add_legend(m, overlay_mode, has_selection=bool(selected_geoids))
+        elif partial_geoid and partial_houses >= FEW_HOUSES_MAX:
+            _add_partial_fill_layer(m, render_gdf, partial_geoid, partial_fraction)
+
+    if partial_geoid and partial_houses < FEW_HOUSES_MAX and marker_latlon is not None:
+        _add_partial_dot(m, marker_latlon, partial_houses)
+
+    _add_legend(m, overlay_mode, has_selection=bool(selected_geoids), has_partial=bool(partial_geoid))
 
     if marker_latlon is not None:
         _add_marker(m, marker_latlon)
@@ -155,10 +178,37 @@ def _add_highlight_layer(m: folium.Map, gdf: gpd.GeoDataFrame, selected_geoids: 
     folium.GeoJson(sub[["GEOID", "geometry"]], name="highlight", style_function=style_function).add_to(m)
 
 
-def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
-    """Price-gradient key, a "your selection" color key, or both -- whichever apply. Skips
-    entirely if there's nothing to explain (no fill and no selection), rather than always
-    reserving map space for an empty box.
+def _add_partial_fill_layer(m: folium.Map, gdf: gpd.GeoDataFrame, geoid: str, fraction: float) -> None:
+    sub = gdf[gdf["GEOID"] == geoid]
+    if len(sub) == 0:
+        return
+
+    opacity = partial_fill_opacity(fraction)
+
+    def style_function(_feature):
+        return {"color": HIGHLIGHT_BORDER, "weight": 2, "fillColor": HIGHLIGHT_FILL, "fillOpacity": opacity}
+
+    folium.GeoJson(sub[["GEOID", "geometry"]], name="partial-fill", style_function=style_function).add_to(m)
+
+
+def _add_partial_dot(m: folium.Map, marker_latlon: tuple[float, float], houses: float) -> None:
+    # Fixed opacity, not scaled by houses -- radius is the only channel here (see
+    # dot_radius's docstring), so this stays a plain solid dot that just grows.
+    folium.CircleMarker(
+        location=list(marker_latlon),
+        radius=dot_radius(houses),
+        color=HIGHLIGHT_BORDER,
+        weight=1.5,
+        fill=True,
+        fill_color=HIGHLIGHT_FILL,
+        fill_opacity=0.75,
+    ).add_to(m)
+
+
+def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool, has_partial: bool = False) -> None:
+    """Price-gradient key, a "your selection" color key, a "partial match" key, or any
+    combination -- whichever apply. Skips entirely if there's nothing to explain, rather
+    than always reserving map space for an empty box.
     """
     # Both sections share the same label weight (600) and the same 120px bar/row
     # width so the two keys read as one consistent system instead of two
@@ -181,6 +231,15 @@ def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool) -> None:
             <span style="width:12px;height:12px;border-radius:2px;display:inline-block;flex-shrink:0;
                         background:{HIGHLIGHT_FILL};border:1.5px solid {HIGHLIGHT_BORDER};"></span>
             <span>Your selection</span>
+          </div>
+        """)
+    if has_partial:
+        divider = "border-top:1px solid #eee;padding-top:8px;margin-top:8px;" if sections else ""
+        sections.append(f"""
+          <div style="display:flex;align-items:center;gap:6px;font-weight:600;width:120px;{divider}">
+            <span style="width:12px;height:12px;border-radius:50%;display:inline-block;flex-shrink:0;
+                        background:{HIGHLIGHT_FILL};opacity:0.65;border:1.5px solid {HIGHLIGHT_BORDER};"></span>
+            <span>Partial match</span>
           </div>
         """)
     if not sections:

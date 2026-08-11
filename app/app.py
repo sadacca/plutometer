@@ -502,8 +502,15 @@ geo_data = store.get_level(st.session_state.geo_level)
 # they're messaging about what the map below them is (or isn't) showing.
 with st.container(key="pm-map"):
     selected_geoids = None
+    partial_geoid = None
+    partial_houses = 0.0
+    partial_fraction = 0.0
     if st.session_state.result is not None and st.session_state.result_level == st.session_state.geo_level:
         selected_geoids = set(st.session_state.result.selected_geoids)
+        if st.session_state.result.num_selected == 0 and st.session_state.result.nearest_geoid:
+            partial_geoid = st.session_state.result.nearest_geoid
+            partial_houses = st.session_state.result.median_houses_to_target
+            partial_fraction = st.session_state.result.nearest_value_fraction
 
     render_gdf = None
     render_bbox = None
@@ -543,6 +550,9 @@ with st.container(key="pm-map"):
         center=st.session_state.map_center,
         zoom=st.session_state.map_zoom,
         render_key=(st.session_state.geo_level, render_bbox),
+        partial_geoid=partial_geoid,
+        partial_houses=partial_houses,
+        partial_fraction=partial_fraction,
     )
 
     # Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
