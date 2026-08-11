@@ -59,20 +59,50 @@ GEO_STEPS = [
         "level": "tract",
     },
     {"id": "country", "name": "The richest person in the country", "ref_name": None, "fallback": None, "level": "state"},
+    # Same target value as "country" (see _pick_country_value), rendered one level finer.
+    # A handful of *whole states* is easy to misread as "not that much" -- restating the
+    # exact same fortune as a couple hundred *whole counties* (still barely a dent
+    # nationwide: ~3,100 counties exist) makes the scale legible a second way right after
+    # the first lands, without introducing a new dollar figure to anchor on.
+    {
+        "id": "country_county",
+        "name": "The richest person in the country",
+        "ref_name": None,
+        "fallback": None,
+        "level": "county",
+    },
 ]
 
 STEP_IDS = ["framing"] + [s["id"] for s in WEALTH_STEPS] + [s["id"] for s in GEO_STEPS]
 
 # Zoom pulls back a notch each step -- house-level detail for the small figures, out to
 # tract-cluster scale for the billionaire step, out again to a full national view once
-# the country step needs to show multiple contiguous states.
-STEP_ZOOM = {"framing": 12, "median": 15, "block": 14, "county": 12, "billionaire": 13, "country": 5}
+# the country steps need to show multiple contiguous states/counties. country_county's
+# selection is a comparable (often larger) geographic footprint to country's, despite
+# being made of much smaller units, so it keeps the same wide zoom. billionaire pulls
+# back two notches further than the tract cluster itself needs (13 would frame the
+# selected tracts tightly) so the surrounding metro -- streets, neighboring
+# neighborhoods, the city's overall shape -- stays visible for context; see
+# _tract_render_bbox's pad at that step's call site for the matching wider geometry
+# fetch, so the extra screen space isn't just empty basemap.
+STEP_ZOOM = {
+    "framing": 12,
+    "median": 15,
+    "block": 14,
+    "county": 12,
+    "billionaire": 11,
+    "country": 5,
+    "country_county": 5,
+}
 
 # Curated replay list rather than free-text city search -- the app has no
 # name-to-location index today (see feature-requests.md); this is the cheap
-# version of "replay somewhere else." Topeka is the default: a legible,
-# small, non-coastal capital that doesn't read oddly against a *national*
-# median figure the way one of the most expensive markets would.
+# version of "replay somewhere else." Omaha is the default: a legible,
+# mid-size, non-coastal metro that doesn't read oddly against a *national*
+# median figure the way one of the most expensive markets would, and (unlike
+# Topeka, the previous default) its "richest person in the country" result
+# at the state level is a stable 4 states rather than sitting right at a
+# knife-edge. See below on why that knife-edge exists.
 #
 # Coordinates point at a residential tract near each city's traditional
 # downtown whose own median_home_value (from data/tract_values.parquet, the
@@ -90,7 +120,28 @@ STEP_ZOOM = {"framing": 12, "median": 15, "block": 14, "county": 12, "billionair
 # tract nearest to downtown among the closest-to-median matches. Comments
 # note that tract's own median home value for a sanity check against
 # reference_values.csv's national median.
+#
+# On Topeka's old "2 states, or 4, depending which block you start from":
+# verified directly against data/cache/state_adjacency.pkl -- the adjacency
+# graph itself is correct (Kansas's real neighbors are only CO/MO/NE/OK;
+# there's no spurious edge to anything farther away). The instability is
+# real but expected, not a data bug: expand_contiguous (app/algorithm.py) is
+# a greedy nearest-first walk that discards a candidate for good the moment
+# it doesn't fit, so at the *state* level -- only 49 units, each worth a
+# wildly different amount -- a few km of difference in the click point can
+# reorder two similarly-distant neighbor states relative to each other, and
+# whichever big one gets tried first can "use up" the budget that several
+# smaller ones would otherwise have fit into. It's also compounded by
+# find_nearest_geoid resolving to the nearest state *centroid*, not the
+# state the point actually sits in -- Omaha's own pick below resolves to
+# Iowa's centroid, not Nebraska's, despite being in Nebraska. Both behaviors
+# are shared with the main click-to-explore map, not intro-only, so fixing
+# them (if wanted) is a separate, bigger change than picking better anchors
+# here. Billings, MT was added specifically because it lands on a clean,
+# non-borderline 6 states for the same target value -- verified the same way.
 INTRO_LOCATIONS = {
+    "Omaha, NE": (41.2638, -95.9683),  # tract median ~$159K
+    "Billings, MT": (45.7867, -108.5152),  # tract median ~$236K
     "Topeka, KS": (39.0663, -95.6958),  # tract median ~$97K
     "Kansas City, MO": (39.1653, -94.5684),  # tract median ~$138K
     "Cleveland, OH": (41.4805, -81.7641),  # tract median ~$102K
@@ -106,7 +157,7 @@ INTRO_LOCATIONS = {
     "Seattle, WA": (47.6144, -122.3057),  # tract median ~$732K
     "San Francisco, CA": (37.7688, -122.4242),  # tract median ~$1.13M
 }
-DEFAULT_INTRO_LOCATION = "Topeka, KS"
+DEFAULT_INTRO_LOCATION = "Omaha, NE"
 
 
 def should_show_intro() -> bool:
@@ -383,7 +434,11 @@ def render_intro(store) -> None:
         tract_data = store.get_level("tract")
         shown = False
         if result is not None and result.num_selected > 0 and tract_data is not None:
-            bbox = _tract_render_bbox(tract_data, result.selected_geoids, (lat, lon))
+            # Wider than the default pad -- matches this step's pulled-back zoom (see
+            # STEP_ZOOM's comment) so the tract layer actually covers the visible metro
+            # area instead of leaving a bare basemap ring around a small highlighted
+            # island.
+            bbox = _tract_render_bbox(tract_data, result.selected_geoids, (lat, lon), pad=0.25)
             if bbox is not None:
                 render_gdf = tract_data.viewport_gdf(bbox)
                 selected_geoids = set(result.selected_geoids)
@@ -405,6 +460,23 @@ def render_intro(store) -> None:
             render_gdf = state_data.full_gdf
             selected_geoids = set(result.selected_geoids)
             _render_geo_result(target_label, "state", result, national_median)
+        else:
+            st.markdown(
+                _card_html(target_label, "Couldn't compute a result for this location."), unsafe_allow_html=True
+            )
+
+    elif step_id == "country_county":
+        # Same target value as "country" -- see GEO_STEPS's comment on why this step
+        # exists -- just resolved one level finer (whole counties instead of whole
+        # states) for the same dollar figure, to show the same fortune's scale a
+        # second way right after the state-level headline lands.
+        value, target_label = _pick_country_value(store)
+        result = _compute_geo_step(store, "county", value, lat, lon)
+        if result is not None and result.num_selected > 0:
+            county_data = store.get_level("county")
+            render_gdf = county_data.full_gdf
+            selected_geoids = set(result.selected_geoids)
+            _render_geo_result(target_label, "county", result, national_median)
         else:
             st.markdown(
                 _card_html(target_label, "Couldn't compute a result for this location."), unsafe_allow_html=True
