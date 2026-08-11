@@ -15,6 +15,7 @@ from components.utils import (
     PARTIAL_DOT_OPACITY_FLOOR,
     PARTIAL_DOT_OPACITY_FULL,
     partial_dot_positions,
+    partial_dot_zoom_scale,
     partial_fill_opacity,
     price_color,
 )
@@ -52,9 +53,10 @@ def build_map(
     partial_geoid/partial_houses/partial_fraction describe the num_selected == 0 case --
     the target undercuts even the nearest whole geography (partial_geoid), which fits
     partial_houses worth of homes at that geography's own median price. Below
-    FEW_HOUSES_MAX houses this draws a size-scaled dot at the marker; at/above it, an
-    opacity-scaled fill of partial_geoid itself -- see components/utils.py's dot_radius
-    and partial_fill_opacity docstrings for why the switch happens there.
+    FEW_HOUSES_MAX houses this draws a zoom-scaled dot cluster at the marker (one dot
+    per house); at/above it, an opacity-scaled fill of partial_geoid itself -- see
+    components/utils.py's partial_dot_positions and partial_fill_opacity docstrings for
+    why the switch happens there.
     """
     m = folium.Map(location=list(center), zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=BASEMAP_URL, attr=BASEMAP_ATTR, name="basemap", max_zoom=18).add_to(m)
@@ -67,7 +69,7 @@ def build_map(
             _add_partial_fill_layer(m, render_gdf, partial_geoid, partial_fraction)
 
     if partial_geoid and partial_houses < FEW_HOUSES_MAX and marker_latlon is not None:
-        _add_partial_dot(m, marker_latlon, partial_houses)
+        _add_partial_dot(m, marker_latlon, partial_houses, zoom)
 
     _add_legend(m, overlay_mode, has_selection=bool(selected_geoids), has_partial=bool(partial_geoid))
 
@@ -201,28 +203,35 @@ def _add_partial_fill_layer(m: folium.Map, gdf: gpd.GeoDataFrame, geoid: str, fr
     folium.GeoJson(sub[["GEOID", "geometry"]], name="partial-fill", style_function=style_function).add_to(m)
 
 
-def _add_partial_dot(m: folium.Map, marker_latlon: tuple[float, float], houses: float) -> None:
+def _add_partial_dot(m: folium.Map, marker_latlon: tuple[float, float], houses: float, zoom: int) -> None:
     """One small dashed-outline dot per house (see partial_dot_positions), or -- below
     one house -- a single such dot whose opacity stands in for the fraction, since a
     discrete dot count only means something once it reaches a whole house.
+
+    Scaled by zoom (see partial_dot_zoom_scale) rather than drawn at a fixed pixel size
+    -- otherwise the cluster stays the same screen size while the actual geography
+    around it shrinks as you zoom out, and increasingly overshoots it.
     """
     if houses < 1:
-        positions = [(0.0, 0.0)]
+        base_positions = [(0.0, 0.0)]
         opacity = PARTIAL_DOT_OPACITY_FLOOR + (PARTIAL_DOT_OPACITY_FULL - PARTIAL_DOT_OPACITY_FLOOR) * max(
             0.0, houses
         )
     else:
-        positions = partial_dot_positions(houses)
+        base_positions = partial_dot_positions(houses)
         opacity = PARTIAL_DOT_OPACITY_FULL
 
-    r = PARTIAL_DOT_DIAMETER_PX / 2
+    scale = partial_dot_zoom_scale(zoom)
+    diameter = PARTIAL_DOT_DIAMETER_PX * scale
+    r = diameter / 2
+    positions = [(dx * scale, dy * scale) for dx, dy in base_positions]
     extent = max((dx**2 + dy**2) ** 0.5 for dx, dy in positions) + r
     container = extent * 2
     center = container / 2
 
     dots_html = "".join(
         f'<div style="position:absolute;left:{center + dx - r:.1f}px;top:{center + dy - r:.1f}px;'
-        f"width:{PARTIAL_DOT_DIAMETER_PX}px;height:{PARTIAL_DOT_DIAMETER_PX}px;border-radius:50%;"
+        f"width:{diameter:.1f}px;height:{diameter:.1f}px;border-radius:50%;"
         f'border:1.5px dashed {HIGHLIGHT_BORDER};background:{HIGHLIGHT_FILL};opacity:{opacity:.2f};"></div>'
         for dx, dy in positions
     )
