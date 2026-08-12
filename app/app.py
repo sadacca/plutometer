@@ -357,6 +357,33 @@ def _zoom_scaled_pad(zoom: int, ref_zoom: int, ref_pad: float, floor_pad: float)
     return max(floor_pad, ref_pad * (2 ** (ref_zoom - zoom)))
 
 
+RENDER_ZOOM_BUCKET = 3  # see _render_zoom
+
+
+def _render_zoom(zoom: int) -> int:
+    """Coarsens zoom to the nearest RENDER_ZOOM_BUCKET-sized step down, for anything that
+    feeds into what actually gets sent to the browser (folium.Map's own zoom_start, and
+    the bbox pad below) -- NOT for threshold checks like TRACT_MIN_ZOOM, which keep using
+    the precise st.session_state.map_zoom elsewhere.
+
+    Streamlit-folium remounts the whole map component whenever the rendered map's own
+    JS changes at all (see the st_folium() call's comment below), and both zoom_start and
+    the tract/county bbox depend on zoom -- so at tract/county-zoomed-in levels, *every
+    single* zoom tick was forcing its own full rebuild. Each of those rebuilds is built
+    from whatever zoom Python captured one render behind (there's no way around that --
+    this render's own st_folium() call is the only place a *new* zoom value can come
+    from), so a burst of rapid zoom-out clicks only ever nets about one level of real
+    progress per burst, each remount partly overwriting the one before it -- which is
+    what made it feel like zooming out from a close-in view toward a nationwide one kept
+    getting reset. Coarsening the zoom used for rendering into 3-level buckets means nearby
+    zoom levels reuse the exact same render, cutting the number of rebuilds (and therefore
+    the number of chances for that overwrite to happen) by roughly RENDER_ZOOM_BUCKET x,
+    without touching the live-view mechanism itself -- unlike the last two rounds' fixes,
+    this doesn't risk the feedback-loop/crash failure mode those hit.
+    """
+    return (zoom // RENDER_ZOOM_BUCKET) * RENDER_ZOOM_BUCKET
+
+
 def _selection_bbox(geo_data, geoids, marker, pad: float) -> tuple[float, float, float, float] | None:
     """Bounding box covering the given geoids' centroids (padded for context),
     or a small box around the marker if there's no selection yet. Deliberately
@@ -534,6 +561,11 @@ with st.container(key="pm-map"):
             partial_houses = st.session_state.result.median_houses_to_target
             partial_fraction = st.session_state.result.nearest_value_fraction
 
+    # Coarsened for rendering (see _render_zoom) -- threshold checks below (TRACT_MIN_ZOOM,
+    # COUNTY_FULL_ZOOM_MAX) still use the precise st.session_state.map_zoom directly, only
+    # the bbox pad and the map's own zoom_start (further down) use this.
+    render_zoom = _render_zoom(st.session_state.map_zoom)
+
     render_gdf = None
     render_bbox = None
     if geo_data is not None:
@@ -541,9 +573,7 @@ with st.container(key="pm-map"):
             if st.session_state.map_zoom < TRACT_MIN_ZOOM:
                 st.info(f"Zoom in to level {TRACT_MIN_ZOOM}+ to see neighborhood boundaries.")
             else:
-                pad = _zoom_scaled_pad(
-                    st.session_state.map_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD
-                )
+                pad = _zoom_scaled_pad(render_zoom, TRACT_MIN_ZOOM, TRACT_BBOX_BASE_PAD, TRACT_BBOX_FLOOR_PAD)
                 render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
                 if render_bbox is not None:
                     render_gdf = geo_data.viewport_gdf(render_bbox)
@@ -557,7 +587,7 @@ with st.container(key="pm-map"):
                 render_gdf = geo_data.full_gdf
             else:
                 pad = _zoom_scaled_pad(
-                    st.session_state.map_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
+                    render_zoom, COUNTY_FULL_ZOOM_MAX + 1, COUNTY_BBOX_BASE_PAD, COUNTY_BBOX_FLOOR_PAD
                 )
                 render_bbox = _selection_bbox(geo_data, selected_geoids, st.session_state.marker, pad=pad)
                 render_gdf = geo_data.viewport_gdf(render_bbox) if render_bbox is not None else geo_data.full_gdf
@@ -584,7 +614,7 @@ with st.container(key="pm-map"):
         selected_geoids=selected_geoids,
         marker_latlon=st.session_state.marker,
         center=st.session_state.map_center,
-        zoom=st.session_state.map_zoom,
+        zoom=render_zoom,
         render_key=(st.session_state.geo_level, render_bbox),
         partial_geoid=partial_geoid,
         partial_houses=partial_houses,
