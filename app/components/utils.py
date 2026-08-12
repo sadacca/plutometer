@@ -61,10 +61,12 @@ PARTIAL_DOT_OPACITY_FULL = 0.85
 # Zoom the app auto-deepens to for a sub-tract (fractional) result. TRACT_MIN_ZOOM only
 # guarantees tract *boundaries* are visible -- nowhere near close enough to make a
 # handful of individual, real-scale house dots (a tiny fraction of the tract's area,
-# see per_house_area_m2 below) legible against actual street/block texture. 15 matches
-# the intro tour's own "median household" step (components/intro.py's STEP_ZOOM),
-# already tuned for exactly this "show individual houses" scale.
-PARTIAL_MATCH_ZOOM = 15
+# see per_house_area_m2 below) legible at all: at zoom 15, a realistic single-house
+# dot (radius on the order of 5-15m for typical tract densities) is only a couple of
+# screen pixels, easy to miss entirely. 17 -- one step short of the basemap's own
+# max_zoom (see map_view.build_map) -- renders that same dot at a legible size while
+# leaving one more zoom step of headroom for anyone who wants to go in even further.
+PARTIAL_MATCH_ZOOM = 17
 
 
 def partial_fill_opacity(fraction: float) -> float:
