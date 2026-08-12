@@ -564,54 +564,47 @@ with st.container(key="pm-map"):
         else:
             render_gdf = geo_data.full_gdf
 
-    # center/zoom are deliberately NOT threaded through to build_map()/folium.Map() here
-    # -- streamlit-folium keys its component instance off a hash of the rendered map's
-    # own JS (see generate_js_hash in streamlit_folium/__init__.py), and that JS embeds
-    # whatever location/zoom_start folium.Map() was built with. Varying those with
-    # st.session_state.map_center/map_zoom on every render meant *every* zoom or pan
-    # action changed the hash and forced a full remount -- a brand new Leaflet instance,
-    # discarding whatever the user had just done, which is what made manual zoom/pan
-    # look like it kept snapping back to a preset. Left at the fixed DEFAULT_CENTER/
-    # DEFAULT_ZOOM, the map's *content* (gradient, highlight, dots) is still what
-    # varies the hash when it genuinely needs to (a new result, a new viewport at tract
-    # level) -- just not the camera position by itself. The actual live position is
-    # asserted below via st_folium's own zoom=/center=, which streamlit-folium applies
-    # with a plain Leaflet setView() on whatever instance is already mounted, not a
-    # reload -- see its docstring ("NOTE that if this...changed, it will *not* reload
-    # the map, but simply dynamically change...").
+    # NOTE: an earlier version of this code tried keeping folium.Map() at a fixed
+    # center/zoom and asserting the live view separately via st_folium's own zoom=/
+    # center= kwargs (documented as a non-reloading setView(), instead of baking
+    # position into the map's own embedded HTML). In practice that produced worse,
+    # harder-to-diagnose symptoms -- the view sometimes jumping far past the intended
+    # zoom, occasionally resetting to the nationwide default, and the map going
+    # unresponsive -- almost certainly some feedback loop between that assertion and
+    # Leaflet's own view-change reporting (animation/rounding interference is the
+    # leading suspect) that can't be safely tracked down without a real browser to
+    # observe it in, which this sandbox doesn't have. Reverted to the simpler,
+    # previously-stable approach below: center/zoom ride along with the rest of the
+    # map's content, so a genuine zoom/pan action does force a full rebuild (the
+    # "snaps back" cosmetic issue this was trying to fix), but that's a strictly
+    # smaller problem than an unresponsive map.
     fmap = build_map(
         render_gdf=render_gdf,
         overlay_mode=overlay_mode,
         selected_geoids=selected_geoids,
         marker_latlon=st.session_state.marker,
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
         render_key=(st.session_state.geo_level, render_bbox),
         partial_geoid=partial_geoid,
         partial_houses=partial_houses,
         partial_fraction=partial_fraction,
     )
 
-    # Only ever *watch* "last_clicked" and "zoom" -- Streamlit reruns the whole script
-    # whenever a watched value changes, and both "center" and "bounds" turned out to be
-    # unsafe to watch: rebuilding the folium.Map from scratch every rerun and
-    # re-mounting it can report a slightly different position/viewport than before
-    # (container-size timing, projection rounding), which registers as a real pan and
-    # triggers another rerun -- a cascade that never settles (see _tract_render_bbox for
-    # how tract geometry avoids needing "bounds" at all). zoom is a plain integer with
-    # no such jitter risk, and is needed for the tract auto-zoom banner regardless of
-    # level. Passing zoom=/center= here (not watching them) is different from that risk
-    # entirely -- it's a one-way assertion of Python's intended view, applied via
-    # setView() and diffed against the *last value Python itself asserted*, not the
-    # live browser state, so it only moves the map when this session's own zoom/center
-    # actually changed (a new click, an auto-zoom bump) -- never in response to the
-    # user's own pan or scroll-zoom, which is exactly what lets those persist untouched
-    # by any otherwise-unrelated rerun (a dropdown change, etc.) in between.
+    # Only ever watch "last_clicked" and "zoom". Streamlit reruns the whole
+    # script whenever a watched value changes, and both "center" and "bounds"
+    # turned out to be unsafe to watch: rebuilding the folium.Map from scratch
+    # every rerun and re-mounting it can report a slightly different position/
+    # viewport than before (container-size timing, projection rounding), which
+    # registers as a real pan and triggers another rerun -- a cascade that never
+    # settles (see _tract_render_bbox for how tract geometry avoids needing
+    # "bounds" at all). zoom is a plain integer with no such jitter risk, and is
+    # needed for the tract auto-zoom banner regardless of the current level.
     map_data = st_folium(
         fmap,
         height=560,
         use_container_width=True,
         returned_objects=["last_clicked", "zoom"],
-        zoom=st.session_state.map_zoom,
-        center=list(st.session_state.map_center),
         key="plutometer_map",
     )
 
@@ -697,13 +690,13 @@ else:
     target_label = ref_choice
 
 if map_data:
-    # Just record the live zoom -- st.session_state.map_zoom is read elsewhere for
-    # bbox sizing and the tract-zoom banner, not to control the map's own view (see the
-    # st_folium() call below for that). No forced st.rerun() here: on top of the
-    # automatic rerun "zoom" already triggers as a watched returned_object, an extra
-    # one here doubled the reruns needed to settle after every single zoom tick --
-    # exactly what made rapid zoom actions (e.g. clicking "zoom out" repeatedly) fall
-    # behind and appear to snap back to an intermediate state.
+    # Record the live zoom for the *next* rerun's build_map() call (bbox sizing, the
+    # tract-zoom banner, and the map's own zoom_start all read it). No forced
+    # st.rerun() here: on top of the automatic rerun "zoom" already triggers as a
+    # watched returned_object, an extra one here doubled the reruns needed to settle
+    # after every single zoom tick -- worth it not to fall behind on rapid zoom
+    # actions, even though it means this render's map (built above, before this line
+    # runs) still reflects the *previous* zoom for one frame.
     if map_data.get("zoom") is not None:
         st.session_state.map_zoom = map_data["zoom"]
 
