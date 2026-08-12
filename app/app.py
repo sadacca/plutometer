@@ -28,6 +28,7 @@ from data_loader import load_store
 from components.intro import render_intro, should_show_intro, start_intro
 from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
+    FEW_HOUSES_MAX,
     LEVEL_LABELS,
     LEVEL_ORDER,
     PARTIAL_MATCH_ZOOM,
@@ -300,14 +301,23 @@ def _run_computation(
             _run_computation(lat, lon, target_value, next_level, target_label, depth=depth + 1)
             return
 
-    # A sub-tract (fractional) result puts a real-scale, tract-area-proportional dot
-    # cluster on the map (see components/map_view.py's _add_partial_dot) -- at
-    # TRACT_MIN_ZOOM, which only guarantees tract *boundaries* are visible, that
-    # cluster is a genuinely tiny sliver of the tract and easy to miss entirely.
-    # Deepen further so it actually lands somewhere legible, same as the boundary-zoom
-    # bump above -- only zooms in, never out, so it doesn't fight a user already
-    # zoomed in past this point.
-    if level == "tract" and result.num_selected == 0 and st.session_state.map_zoom < PARTIAL_MATCH_ZOOM:
+    # A sub-tract (fractional) result under FEW_HOUSES_MAX houses puts a real-scale,
+    # tract-area-proportional dot cluster on the map (see components/map_view.py's
+    # _add_partial_dot) -- at TRACT_MIN_ZOOM, which only guarantees tract *boundaries*
+    # are visible, that cluster is a genuinely tiny sliver of the tract and easy to miss
+    # entirely. Deepen further so it actually lands somewhere legible, same as the
+    # boundary-zoom bump above -- only zooms in, never out, so it doesn't fight a user
+    # already zoomed in past this point. At/above FEW_HOUSES_MAX houses the same
+    # fractional result instead fills the *whole* tract polygon (still "part of a
+    # neighborhood," not a dot cluster) -- that needs a wide-enough view to actually see
+    # the shape, so it deliberately does NOT get this deeper zoom (see the intro tour's
+    # own "county" step, components/intro.py's STEP_ZOOM, for the same distinction).
+    if (
+        level == "tract"
+        and result.num_selected == 0
+        and result.median_houses_to_target < FEW_HOUSES_MAX
+        and st.session_state.map_zoom < PARTIAL_MATCH_ZOOM
+    ):
         st.session_state.map_zoom = PARTIAL_MATCH_ZOOM
         st.toast("Zooming in further to show individual houses...")
 
@@ -666,8 +676,19 @@ else:
     target_label = ref_choice
 
 if map_data:
-    if map_data.get("zoom") is not None:
-        st.session_state.map_zoom = map_data["zoom"]
+    # build_map() above already used the *previous* st.session_state.map_zoom to
+    # construct this render's map -- map_data["zoom"] is what the map actually is right
+    # now (it's what just caused this rerun, if a zoom tick did). Storing it without
+    # forcing a follow-up rerun would leave the *next* unrelated rerun (a dropdown
+    # change, a click elsewhere) rebuild the map from the *now-stale* value once more,
+    # which is what made manual zooming look like it kept reverting -- every single
+    # zoom action rendered one step behind, and nothing ever forced the catch-up. zoom
+    # is a plain integer with no jitter risk (see the returned_objects comment below),
+    # so comparing old-vs-new here can't loop: once they match, this stops firing.
+    new_zoom = map_data.get("zoom")
+    if new_zoom is not None and new_zoom != st.session_state.map_zoom:
+        st.session_state.map_zoom = new_zoom
+        st.rerun()
 
     # streamlit_folium keys its component instance off a hash of the *rendered
     # map's own JS* (see generate_js_hash in streamlit_folium/__init__.py), not
