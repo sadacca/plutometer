@@ -31,7 +31,7 @@ from components.utils import (
     FEW_HOUSES_MAX,
     LEVEL_LABELS,
     LEVEL_ORDER,
-    PARTIAL_MATCH_ZOOM,
+    MAIN_MAP_PARTIAL_MATCH_ZOOM,
     TRACT_MIN_ZOOM,
     fmt_dollar,
     fmt_full,
@@ -316,9 +316,9 @@ def _run_computation(
         level == "tract"
         and result.num_selected == 0
         and result.median_houses_to_target < FEW_HOUSES_MAX
-        and st.session_state.map_zoom < PARTIAL_MATCH_ZOOM
+        and st.session_state.map_zoom < MAIN_MAP_PARTIAL_MATCH_ZOOM
     ):
-        st.session_state.map_zoom = PARTIAL_MATCH_ZOOM
+        st.session_state.map_zoom = MAIN_MAP_PARTIAL_MATCH_ZOOM
         st.toast("Zooming in further to show individual houses...")
 
     national_median = store.national_median_home_value
