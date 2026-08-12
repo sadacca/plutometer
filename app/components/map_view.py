@@ -225,9 +225,9 @@ def _add_partial_dot(
     fraction: float,
     marker_latlon: tuple[float, float],
 ) -> None:
-    """One dashed-outline dot per house (see sunflower_positions), or -- below one house
-    -- a single such dot whose opacity stands in for the fraction, since a discrete dot
-    count only means something once it reaches a whole house.
+    """One dot per house (see sunflower_positions), or -- below one house -- a single
+    such dot whose opacity stands in for the fraction, since a discrete dot count only
+    means something once it reaches a whole house.
 
     Drawn as real ground geometry (folium.Circle, radius in meters, positioned by a real
     lat/lon offset) rather than a fixed pixel size, sized from partial_geoid's own area
@@ -236,6 +236,12 @@ def _add_partial_dot(
     like the tract polygon it's drawn over) *and* stays proportionate to that specific
     tract (a few houses' worth of area is a small, honestly-scaled sliver of a real
     tract, not an arbitrary shape sized to just look reasonable).
+
+    Dashed border only below one house: that single dot is standing in for less than
+    what it's drawn as (a whole house's footprint, dimmed to a fraction), the same
+    reason the geography-fill tier is dashed. A dot at >= 1 house *is* a whole house,
+    accurately sized -- solid, like the marker itself, since there's nothing fuzzy about
+    it to signal.
     """
     sub = gdf[gdf["GEOID"] == geoid]
     if len(sub) == 0 or houses <= 0:
@@ -250,10 +256,12 @@ def _add_partial_dot(
     if houses < 1:
         positions = [(0.0, 0.0)]
         opacity = PARTIAL_DOT_OPACITY_FLOOR + (PARTIAL_DOT_OPACITY_FULL - PARTIAL_DOT_OPACITY_FLOOR) * houses
+        dash_array = PARTIAL_DASH_ARRAY
     else:
         n = max(1, min(round(houses), FEW_HOUSES_MAX))
         positions = sunflower_positions(n, dot_radius_m)
         opacity = PARTIAL_DOT_OPACITY_FULL
+        dash_array = None
 
     lat, lon = marker_latlon
     for dx, dy in positions:
@@ -262,7 +270,7 @@ def _add_partial_dot(
             radius=dot_radius_m,
             color=HIGHLIGHT_BORDER,
             weight=1.5,
-            dash_array=PARTIAL_DASH_ARRAY,
+            dash_array=dash_array,
             fill=True,
             fill_color=HIGHLIGHT_FILL,
             fill_opacity=opacity,

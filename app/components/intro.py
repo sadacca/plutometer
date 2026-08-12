@@ -23,7 +23,15 @@ from streamlit_folium import st_folium
 
 from algorithm import expand_contiguous
 from components.map_view import build_map
-from components.utils import fmt_dollar, fmt_houses, fmt_num, fractional_headline, geo_label, house_icon_row
+from components.utils import (
+    PARTIAL_MATCH_ZOOM,
+    fmt_dollar,
+    fmt_houses,
+    fmt_num,
+    fractional_headline,
+    geo_label,
+    house_icon_row,
+)
 
 # Anchored to data/reference_values.csv's own SCF-sourced percentile rows
 # (single source of truth -- stays in sync with any future refresh of that
@@ -90,12 +98,16 @@ STEP_IDS = ["framing"] + [s["id"] for s in WEALTH_STEPS] + [s["id"] for s in GEO
 # selected tracts tightly) so the surrounding metro -- streets, neighboring
 # neighborhoods, the city's overall shape -- stays visible for context; see
 # _tract_render_bbox's pad at that step's call site for the matching wider geometry
-# fetch, so the extra screen space isn't just empty basemap.
+# fetch, so the extra screen space isn't just empty basemap. median/block/county always
+# render the partial-match dot cluster (see _render_fractional_step), never a real
+# highlight, so they share PARTIAL_MATCH_ZOOM with the main app's own click flow --
+# anything shallower leaves the (real-scale, tract-area-proportional) dots too small to
+# see at all, not just cramped for context.
 STEP_ZOOM = {
     "framing": 12,
-    "median": 15,
-    "block": 14,
-    "county": 12,
+    "median": PARTIAL_MATCH_ZOOM,
+    "block": PARTIAL_MATCH_ZOOM,
+    "county": PARTIAL_MATCH_ZOOM,
     "billionaire": 11,
     "country": 5,
     "country_county": 5,
