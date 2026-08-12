@@ -98,16 +98,21 @@ STEP_IDS = ["framing"] + [s["id"] for s in WEALTH_STEPS] + [s["id"] for s in GEO
 # selected tracts tightly) so the surrounding metro -- streets, neighboring
 # neighborhoods, the city's overall shape -- stays visible for context; see
 # _tract_render_bbox's pad at that step's call site for the matching wider geometry
-# fetch, so the extra screen space isn't just empty basemap. median/block/county always
-# render the partial-match dot cluster (see _render_fractional_step), never a real
-# highlight, so they share PARTIAL_MATCH_ZOOM with the main app's own click flow --
-# anything shallower leaves the (real-scale, tract-area-proportional) dots too small to
-# see at all, not just cramped for context.
+# fetch, so the extra screen space isn't just empty basemap. median/block never clear
+# FEW_HOUSES_MAX houses at any INTRO_LOCATIONS price point, so they always render the
+# partial-match *dot cluster* (see _render_fractional_step) -- sharing PARTIAL_MATCH_ZOOM
+# with the main app's own click flow, since anything shallower leaves the (real-scale,
+# tract-area-proportional) dots too small to see at all, not just cramped for context.
+# county (99.9th percentile) is a different case: at most of those same locations its
+# house count clears FEW_HOUSES_MAX, so it renders the *geography fill* instead -- the
+# whole tract polygon, not a handful of dots -- and needs a wide-enough view to actually
+# see that shape, not a deep one meant for house-scale detail. Kept at its original,
+# wider zoom rather than following median/block's deeper one.
 STEP_ZOOM = {
     "framing": 12,
     "median": PARTIAL_MATCH_ZOOM,
     "block": PARTIAL_MATCH_ZOOM,
-    "county": PARTIAL_MATCH_ZOOM,
+    "county": 12,
     "billionaire": 11,
     "country": 5,
     "country_county": 5,
