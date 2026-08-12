@@ -30,6 +30,7 @@ from components.map_view import DEFAULT_CENTER, DEFAULT_ZOOM, build_map
 from components.utils import (
     LEVEL_LABELS,
     LEVEL_ORDER,
+    PARTIAL_MATCH_ZOOM,
     TRACT_MIN_ZOOM,
     fmt_dollar,
     fmt_full,
@@ -298,6 +299,17 @@ def _run_computation(
                 st.toast("Zooming in to show neighborhood boundaries...")
             _run_computation(lat, lon, target_value, next_level, target_label, depth=depth + 1)
             return
+
+    # A sub-tract (fractional) result puts a real-scale, tract-area-proportional dot
+    # cluster on the map (see components/map_view.py's _add_partial_dot) -- at
+    # TRACT_MIN_ZOOM, which only guarantees tract *boundaries* are visible, that
+    # cluster is a genuinely tiny sliver of the tract and easy to miss entirely.
+    # Deepen further so it actually lands somewhere legible, same as the boundary-zoom
+    # bump above -- only zooms in, never out, so it doesn't fight a user already
+    # zoomed in past this point.
+    if level == "tract" and result.num_selected == 0 and st.session_state.map_zoom < PARTIAL_MATCH_ZOOM:
+        st.session_state.map_zoom = PARTIAL_MATCH_ZOOM
+        st.toast("Zooming in further to show individual houses...")
 
     national_median = store.national_median_home_value
     national_houses = target_value / national_median if national_median > 0 else 0.0
