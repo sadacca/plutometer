@@ -58,18 +58,18 @@ PARTIAL_DOT_CLUSTER_OVERHEAD = 1.4
 PARTIAL_DOT_OPACITY_FLOOR = 0.3
 PARTIAL_DOT_OPACITY_FULL = 0.85
 
-# Zoom the app auto-deepens to for a sub-tract (fractional) result. TRACT_MIN_ZOOM only
-# guarantees tract *boundaries* are visible -- nowhere near close enough to make a
-# handful of individual, real-scale house dots (a tiny fraction of the tract's area, see
-# per_house_area_m2 below) legible. 17 -- confirmed working well in the intro tour's
-# median/block steps (components/intro.py's STEP_ZOOM), which share this exact value
-# and this exact dot-sizing code but never had the main map's remount/rerun bug (the
-# intro's own st_folium call uses returned_objects=[], no live view-tracking at all) --
-# is kept as-is here. That comparison is the strongest evidence available that the
-# *value* was never the problem; see app.py's st_folium() call for the actual fix
-# (the map was remounting from scratch on every zoom/pan, discarding manual navigation
-# and, under rapid changes, falling behind and rendering stale intermediate states).
+# Zoom the intro tour auto-deepens to for its median/block steps (components/intro.py's
+# STEP_ZOOM), which always render the sub-tract dot cluster (see per_house_area_m2
+# below) -- confirmed working well there.
 PARTIAL_MATCH_ZOOM = 17
+
+# Zoom the *main map's* own click flow auto-deepens to for a sub-tract (fractional,
+# dot-tier) result -- deliberately a separate, shallower constant from
+# PARTIAL_MATCH_ZOOM rather than sharing it. The intro's fixed-camera-per-step design
+# and the main map's live, user-navigable one are different enough contexts that they
+# don't need to agree, and pulled back 5 zoom levels from PARTIAL_MATCH_ZOOM at the
+# main map's own request after 17 read as too deep there specifically.
+MAIN_MAP_PARTIAL_MATCH_ZOOM = PARTIAL_MATCH_ZOOM - 5
 
 
 def partial_fill_opacity(fraction: float) -> float:
