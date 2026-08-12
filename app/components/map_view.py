@@ -1,24 +1,28 @@
 """Folium map builder for plutometer -- basemap, gradient overlay, and selection highlight."""
 
 import json
+import math
 
 import geopandas as gpd
 import folium
 import streamlit as st
+from pyproj import Geod
 
 from components.utils import (
     FEW_HOUSES_MAX,
     HIGHLIGHT_BORDER,
     HIGHLIGHT_FILL,
     PARTIAL_DASH_ARRAY,
-    PARTIAL_DOT_DIAMETER_PX,
     PARTIAL_DOT_OPACITY_FLOOR,
     PARTIAL_DOT_OPACITY_FULL,
-    partial_dot_positions,
-    partial_dot_zoom_scale,
+    per_house_area_m2,
     partial_fill_opacity,
     price_color,
+    sunflower_positions,
 )
+
+_GEOD = Geod(ellps="WGS84")
+_METERS_PER_DEGREE_LAT = 111_320.0
 
 BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
 BASEMAP_ATTR = "&copy; OpenStreetMap &copy; CARTO"
@@ -52,11 +56,12 @@ def build_map(
 
     partial_geoid/partial_houses/partial_fraction describe the num_selected == 0 case --
     the target undercuts even the nearest whole geography (partial_geoid), which fits
-    partial_houses worth of homes at that geography's own median price. Below
-    FEW_HOUSES_MAX houses this draws a zoom-scaled dot cluster at the marker (one dot
-    per house); at/above it, an opacity-scaled fill of partial_geoid itself -- see
-    components/utils.py's partial_dot_positions and partial_fill_opacity docstrings for
-    why the switch happens there.
+    partial_houses worth of homes at that geography's own median price, valued at
+    partial_fraction of that geography's total value. Below FEW_HOUSES_MAX houses this
+    draws one real, ground-scaled dot per house at the marker, sized from partial_geoid's
+    *own* area (see components/utils.py's per_house_area_m2); at/above it, an
+    opacity-scaled fill of partial_geoid itself. Both need partial_geoid's geometry, so
+    both only draw when render_gdf actually contains it.
     """
     m = folium.Map(location=list(center), zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=BASEMAP_URL, attr=BASEMAP_ATTR, name="basemap", max_zoom=18).add_to(m)
@@ -67,9 +72,8 @@ def build_map(
             _add_highlight_layer(m, render_gdf, selected_geoids)
         elif partial_geoid and partial_houses >= FEW_HOUSES_MAX:
             _add_partial_fill_layer(m, render_gdf, partial_geoid, partial_fraction)
-
-    if partial_geoid and partial_houses < FEW_HOUSES_MAX and marker_latlon is not None:
-        _add_partial_dot(m, marker_latlon, partial_houses, zoom)
+        elif partial_geoid and marker_latlon is not None:
+            _add_partial_dot(m, render_gdf, partial_geoid, partial_houses, partial_fraction, marker_latlon)
 
     _add_legend(m, overlay_mode, has_selection=bool(selected_geoids), has_partial=bool(partial_geoid))
 
@@ -203,46 +207,66 @@ def _add_partial_fill_layer(m: folium.Map, gdf: gpd.GeoDataFrame, geoid: str, fr
     folium.GeoJson(sub[["GEOID", "geometry"]], name="partial-fill", style_function=style_function).add_to(m)
 
 
-def _add_partial_dot(m: folium.Map, marker_latlon: tuple[float, float], houses: float, zoom: int) -> None:
-    """One small dashed-outline dot per house (see partial_dot_positions), or -- below
-    one house -- a single such dot whose opacity stands in for the fraction, since a
-    discrete dot count only means something once it reaches a whole house.
-
-    Scaled by zoom (see partial_dot_zoom_scale) rather than drawn at a fixed pixel size
-    -- otherwise the cluster stays the same screen size while the actual geography
-    around it shrinks as you zoom out, and increasingly overshoots it.
+def _geo_offset(lat: float, lon: float, dx_m: float, dy_m: float) -> tuple[float, float]:
+    """(lat, lon) of the point dx_m/dy_m meters east/north of (lat, lon) -- a flat-earth
+    approximation that's fine at the tens-of-meters scale these offsets are (see
+    _add_partial_dot), same spirit as data_loader's other small-area approximations.
     """
+    dlat = dy_m / _METERS_PER_DEGREE_LAT
+    dlon = dx_m / (_METERS_PER_DEGREE_LAT * math.cos(math.radians(lat)))
+    return (lat + dlat, lon + dlon)
+
+
+def _add_partial_dot(
+    m: folium.Map,
+    gdf: gpd.GeoDataFrame,
+    geoid: str,
+    houses: float,
+    fraction: float,
+    marker_latlon: tuple[float, float],
+) -> None:
+    """One dashed-outline dot per house (see sunflower_positions), or -- below one house
+    -- a single such dot whose opacity stands in for the fraction, since a discrete dot
+    count only means something once it reaches a whole house.
+
+    Drawn as real ground geometry (folium.Circle, radius in meters, positioned by a real
+    lat/lon offset) rather than a fixed pixel size, sized from partial_geoid's own area
+    via per_house_area_m2 -- see that function's docstring for why. This is what
+    guarantees the cluster both scales correctly with zoom (it's real geometry, exactly
+    like the tract polygon it's drawn over) *and* stays proportionate to that specific
+    tract (a few houses' worth of area is a small, honestly-scaled sliver of a real
+    tract, not an arbitrary shape sized to just look reasonable).
+    """
+    sub = gdf[gdf["GEOID"] == geoid]
+    if len(sub) == 0 or houses <= 0:
+        return
+
+    geo_area_m2 = abs(_GEOD.geometry_area_perimeter(sub.geometry.iloc[0])[0])
+    house_area_m2 = per_house_area_m2(geo_area_m2, fraction, houses)
+    if house_area_m2 <= 0:
+        return
+    dot_radius_m = math.sqrt(house_area_m2 / math.pi)
+
     if houses < 1:
-        base_positions = [(0.0, 0.0)]
-        opacity = PARTIAL_DOT_OPACITY_FLOOR + (PARTIAL_DOT_OPACITY_FULL - PARTIAL_DOT_OPACITY_FLOOR) * max(
-            0.0, houses
-        )
+        positions = [(0.0, 0.0)]
+        opacity = PARTIAL_DOT_OPACITY_FLOOR + (PARTIAL_DOT_OPACITY_FULL - PARTIAL_DOT_OPACITY_FLOOR) * houses
     else:
-        base_positions = partial_dot_positions(houses)
+        n = max(1, min(round(houses), FEW_HOUSES_MAX))
+        positions = sunflower_positions(n, dot_radius_m)
         opacity = PARTIAL_DOT_OPACITY_FULL
 
-    scale = partial_dot_zoom_scale(zoom)
-    diameter = PARTIAL_DOT_DIAMETER_PX * scale
-    r = diameter / 2
-    positions = [(dx * scale, dy * scale) for dx, dy in base_positions]
-    extent = max((dx**2 + dy**2) ** 0.5 for dx, dy in positions) + r
-    container = extent * 2
-    center = container / 2
-
-    dots_html = "".join(
-        f'<div style="position:absolute;left:{center + dx - r:.1f}px;top:{center + dy - r:.1f}px;'
-        f"width:{diameter:.1f}px;height:{diameter:.1f}px;border-radius:50%;"
-        f'border:1.5px dashed {HIGHLIGHT_BORDER};background:{HIGHLIGHT_FILL};opacity:{opacity:.2f};"></div>'
-        for dx, dy in positions
-    )
-    folium.Marker(
-        location=list(marker_latlon),
-        icon=folium.DivIcon(
-            html=f'<div style="position:relative;width:{container:.1f}px;height:{container:.1f}px;">{dots_html}</div>',
-            icon_size=(container, container),
-            icon_anchor=(center, center),
-        ),
-    ).add_to(m)
+    lat, lon = marker_latlon
+    for dx, dy in positions:
+        folium.Circle(
+            location=list(_geo_offset(lat, lon, dx, dy)),
+            radius=dot_radius_m,
+            color=HIGHLIGHT_BORDER,
+            weight=1.5,
+            dash_array=PARTIAL_DASH_ARRAY,
+            fill=True,
+            fill_color=HIGHLIGHT_FILL,
+            fill_opacity=opacity,
+        ).add_to(m)
 
 
 def _add_legend(m: folium.Map, overlay_mode: str, has_selection: bool, has_partial: bool = False) -> None:

@@ -38,32 +38,33 @@ PARTIAL_DASH_ARRAY = "6, 4"
 
 # One dot per house, always, no cap -- literal individual units read as more concrete
 # than an abstract growing circle, and "one dot might stand for 2+ houses" (an earlier
-# version capped the drawn count and let the ring alone keep growing past it) undermines
-# that the moment someone notices the count doesn't match. Sized to just ring the click
-# marker itself (radius 7px, see map_view._add_marker), not dwarf it. All sizes below
-# are a baseline tuned for PARTIAL_DOT_REF_ZOOM -- see partial_dot_zoom_scale for why
-# they can't just be fixed pixel constants the way the click marker's own halo is.
-PARTIAL_DOT_DIAMETER_PX = 14
-# Packing radius (in dot-diameters) for n dots arranged in the sunflower/Vogel spiral
-# partial_dot_positions builds -- tuned so same-size dots tile without overlapping,
-# however many there are.
-PARTIAL_DOT_PACK_FACTOR = 0.62
+# version capped the drawn count) undermines that the moment someone notices the count
+# doesn't match. Drawn as real ground geometry (folium.Circle, radius in meters --
+# see map_view._add_partial_dot), not a fixed pixel size: a pixel-sized marker either
+# looks right at one zoom and wrong at every other one, or (worse) has no relationship
+# to how big the underlying geography actually is on screen. Real geometry sidesteps
+# both problems at once -- it scales with zoom exactly like the tract polygon itself
+# does, automatically, and its size is derived from that specific tract's own area
+# rather than a guessed constant.
+#
+# How much bigger the cluster's overall footprint is allowed to be than the literal
+# sum of its own dots' areas -- small headroom so n dots can spread out and stay
+# individually legible, without letting the *cluster itself* balloon past what the
+# house count actually represents. A pure packing-density constant (spread ~
+# diameter*sqrt(n)) doesn't cap this: it grows the encompassing circle faster than the
+# dots' own total area does, so by ~10 houses the whole cluster was already reading as
+# visibly bigger than 10 houses' real share of the tract, worse for any more than that.
+PARTIAL_DOT_CLUSTER_OVERHEAD = 1.4
 PARTIAL_DOT_OPACITY_FLOOR = 0.3
 PARTIAL_DOT_OPACITY_FULL = 0.85
 
-# A fixed pixel size looks right at one zoom and wrong at every other one -- the actual
-# geography around it (the tract outline, the gradient fill) shrinks on screen as you
-# zoom out, so a constant-size dot cluster increasingly overshoots it and reads as
-# oversized. TRACT_MIN_ZOOM is what the app auto-lands on for a fractional tract result
-# (see app.py's auto-cascade), so it's the zoom the sizes above are tuned for; scaling
-# by 2x per zoom level away from it matches how Web Mercator itself halves
-# degrees-per-pixel per +1 zoom, so the cluster tracks the geography's own on-screen
-# size instead of staying fixed. Deliberately *not* floored on the low end -- a floor
-# reintroduces the exact "looks huge once zoomed out past it" bug this exists to fix,
-# just at whatever zoom the floor kicks in instead of at PARTIAL_DOT_REF_ZOOM. Only
-# capped on the high end, to keep zooming in from blowing the cluster up indefinitely.
-PARTIAL_DOT_REF_ZOOM = TRACT_MIN_ZOOM
-PARTIAL_DOT_MAX_SCALE = 2.5
+# Zoom the app auto-deepens to for a sub-tract (fractional) result. TRACT_MIN_ZOOM only
+# guarantees tract *boundaries* are visible -- nowhere near close enough to make a
+# handful of individual, real-scale house dots (a tiny fraction of the tract's area,
+# see per_house_area_m2 below) legible against actual street/block texture. 15 matches
+# the intro tour's own "median household" step (components/intro.py's STEP_ZOOM),
+# already tuned for exactly this "show individual houses" scale.
+PARTIAL_MATCH_ZOOM = 15
 
 
 def partial_fill_opacity(fraction: float) -> float:
@@ -73,29 +74,43 @@ def partial_fill_opacity(fraction: float) -> float:
     return PARTIAL_FILL_OPACITY_FLOOR + (PARTIAL_FILL_OPACITY_CAP - PARTIAL_FILL_OPACITY_FLOOR) * t
 
 
-def partial_dot_zoom_scale(zoom: int) -> float:
-    """Screen-size multiplier for the partial-match dot cluster at the given zoom,
-    relative to its PARTIAL_DOT_REF_ZOOM-tuned baseline size -- see that constant's
-    comment for why this needs to exist, and why it's unclamped below PARTIAL_DOT_REF_ZOOM.
+def per_house_area_m2(geo_area_m2: float, fraction: float, houses: float) -> float:
+    """One house's average real-world footprint (m^2) within a specific geography, given
+    that geography's own ground area, and the target's fraction/houses (see
+    map_view._add_partial_dot). fraction (target_value / geo_value) equals
+    houses / geo's total housing units by construction -- total value is
+    housing_units * median_home_value nationwide (scripts/prepare_data.py) -- so
+    fraction / houses is exactly 1 / total housing units, independent of the target
+    amount itself. This is what makes "10 houses" a small, honestly-sized fraction of
+    a dense tract's area and a comparatively larger one of a sparse tract's -- it's
+    driven by that specific geography's own real density, not an assumed constant.
     """
-    return min(PARTIAL_DOT_MAX_SCALE, 2 ** (zoom - PARTIAL_DOT_REF_ZOOM))
+    if houses <= 0:
+        return 0.0
+    return geo_area_m2 * fraction / houses
 
 
-def partial_dot_positions(houses: float) -> list[tuple[float, float]]:
-    """Baseline (pre zoom-scale) pixel (dx, dy) offsets for exactly round(houses) dots
-    (capped only by FEW_HOUSES_MAX, the tier boundary this is never called past -- see
-    map_view.build_map), one per house. A single house sits exactly on the click point;
-    for more than one, dots are packed via a sunflower/Vogel spiral (even density, no
-    overlap, no preferred direction) whose radius grows with sqrt(n) -- the same
-    relationship a real evenly-packed cluster of n same-size items has, so the *whole*
-    cluster's footprint scales legibly with house count instead of freezing once some
-    fixed dot-count cap is hit.
+def partial_dot_cluster_radius(n: int, dot_radius: float) -> float:
+    """Radius of the smallest circle guaranteed to contain n dots of the given radius,
+    with PARTIAL_DOT_CLUSTER_OVERHEAD headroom for spacing -- i.e. the whole cluster's
+    footprint is capped at PARTIAL_DOT_CLUSTER_OVERHEAD x what n dots' worth of area
+    literally is, not however much room a spiral happens to spread them across. Unit-
+    agnostic (pixels, meters, ...) -- matches whatever unit dot_radius is given in.
     """
-    n = max(1, min(round(houses), FEW_HOUSES_MAX))
-    if n == 1:
+    return math.sqrt(n * dot_radius**2 * PARTIAL_DOT_CLUSTER_OVERHEAD)
+
+
+def sunflower_positions(n: int, dot_radius: float) -> list[tuple[float, float]]:
+    """Evenly-packed (dx, dy) offsets, in whatever unit dot_radius is given in (pixels,
+    meters, ...), for n same-size circles of that radius -- a sunflower/Vogel spiral
+    (even density, no preferred direction), spread out to just reach
+    partial_dot_cluster_radius(n, dot_radius) at the outermost dot's outer edge. A
+    single circle (n <= 1) sits exactly at the origin.
+    """
+    if n <= 1:
         return [(0.0, 0.0)]
     golden_angle = math.pi * (3 - math.sqrt(5))
-    pack_radius = PARTIAL_DOT_PACK_FACTOR * PARTIAL_DOT_DIAMETER_PX * math.sqrt(n)
+    pack_radius = max(0.0, partial_dot_cluster_radius(n, dot_radius) - dot_radius)
     positions = []
     for i in range(n):
         r = pack_radius * math.sqrt((i + 0.5) / n)
