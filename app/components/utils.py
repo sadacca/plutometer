@@ -60,12 +60,15 @@ PARTIAL_DOT_OPACITY_FULL = 0.85
 
 # Zoom the app auto-deepens to for a sub-tract (fractional) result. TRACT_MIN_ZOOM only
 # guarantees tract *boundaries* are visible -- nowhere near close enough to make a
-# handful of individual, real-scale house dots (a tiny fraction of the tract's area,
-# see per_house_area_m2 below) legible at all: at zoom 15, a realistic single-house
-# dot (radius on the order of 5-15m for typical tract densities) is only a couple of
-# screen pixels, easy to miss entirely. 17 -- one step short of the basemap's own
-# max_zoom (see map_view.build_map) -- renders that same dot at a legible size while
-# leaving one more zoom step of headroom for anyone who wants to go in even further.
+# handful of individual, real-scale house dots (a tiny fraction of the tract's area, see
+# per_house_area_m2 below) legible. 17 -- confirmed working well in the intro tour's
+# median/block steps (components/intro.py's STEP_ZOOM), which share this exact value
+# and this exact dot-sizing code but never had the main map's remount/rerun bug (the
+# intro's own st_folium call uses returned_objects=[], no live view-tracking at all) --
+# is kept as-is here. That comparison is the strongest evidence available that the
+# *value* was never the problem; see app.py's st_folium() call for the actual fix
+# (the map was remounting from scratch on every zoom/pan, discarding manual navigation
+# and, under rapid changes, falling behind and rendering stale intermediate states).
 PARTIAL_MATCH_ZOOM = 17
 
 
